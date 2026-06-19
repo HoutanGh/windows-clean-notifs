@@ -1,3 +1,3 @@
-# discord-clean-notifs
+# windows-clean-notifs
 
 Clean Discord notification tooling.
