@@ -23,7 +23,19 @@ internal static class Program
             ("duplicate notifications are ignored", DuplicateNotificationsAreNotInsertedTwice),
             ("raw text round trips", RawTextElementsRoundTripInOrder),
             ("startup notifications are not stored", StartupSnapshotNotificationsAreNotStored),
-            ("retention preserves sources", RetentionRemovesOldNotificationsButPreservesSources)
+            ("retention preserves sources", RetentionRemovesOldNotificationsButPreservesSources),
+            ("display maps normal title and body", DisplayMapsNormalTitleAndBody),
+            ("display title fallback", DisplayUsesRawTextWhenTitleIsMissing),
+            ("display body fallback", DisplayUsesRemainingRawTextWhenBodyIsMissing),
+            ("display hides empty fields", DisplayHidesEmptyFields),
+            ("display suppresses duplicate title and body", DisplaySuppressesDuplicateTitleAndBody),
+            ("display preserves raw fallback order", DisplayPreservesRawTextElementOrder),
+            ("display preserves multiline text", DisplayPreservesMultilineText),
+            ("display preserves symbols", DisplayPreservesUrlsTickersPricesEmojiAndSymbols),
+            ("display does not mutate raw values", DisplayMappingDoesNotMutateRawValues),
+            ("display mapping is deterministic", DisplayMappingIsDeterministic),
+            ("normal terminal output excludes debug metadata", NormalTerminalOutputExcludesDebugMetadata),
+            ("debug raw output includes code points", DebugRawOutputIncludesRawValuesAndCodePoints)
         };
 
         var failures = 0;
@@ -438,6 +450,198 @@ internal static class Program
         }
     }
 
+    private static Task DisplayMapsNormalTitleAndBody()
+    {
+        var notification = DisplayNotification(
+            title: "  Title  ",
+            body: "  Body  ",
+            rawTextElements: ["  Title  ", "  Body  "]);
+
+        var display = NotificationDisplayMapper.Map(notification);
+
+        AssertEqual("App One", display.SourceApp);
+        AssertEqual(DateTimeOffset.Parse("2026-06-21T12:00:00+01:00"), display.Timestamp);
+        AssertEqual("Title", display.PrimaryText);
+        AssertEqual("Body", display.MessageText);
+        return Task.CompletedTask;
+    }
+
+    private static Task DisplayUsesRawTextWhenTitleIsMissing()
+    {
+        var notification = DisplayNotification(
+            title: "   ",
+            body: "Body",
+            rawTextElements: ["  Raw primary  ", "Raw secondary"]);
+
+        var display = NotificationDisplayMapper.Map(notification);
+
+        AssertEqual("Raw primary", display.PrimaryText);
+        AssertEqual("Body", display.MessageText);
+        return Task.CompletedTask;
+    }
+
+    private static Task DisplayUsesRemainingRawTextWhenBodyIsMissing()
+    {
+        var notification = DisplayNotification(
+            title: "Title",
+            body: "",
+            rawTextElements: ["Title", "Line one", "Line two"]);
+
+        var display = NotificationDisplayMapper.Map(notification);
+
+        AssertEqual("Title", display.PrimaryText);
+        AssertEqual("Line one\nLine two", display.MessageText);
+        return Task.CompletedTask;
+    }
+
+    private static Task DisplayHidesEmptyFields()
+    {
+        var notification = DisplayNotification(
+            title: "   ",
+            body: "\t",
+            rawTextElements: [" ", ""]);
+
+        var display = NotificationDisplayMapper.Map(notification);
+
+        AssertNull(display.PrimaryText);
+        AssertNull(display.MessageText);
+        return Task.CompletedTask;
+    }
+
+    private static Task DisplaySuppressesDuplicateTitleAndBody()
+    {
+        var notification = DisplayNotification(
+            title: " Same ",
+            body: "Same",
+            rawTextElements: ["Same", "Same"]);
+
+        var display = NotificationDisplayMapper.Map(notification);
+
+        AssertEqual("Same", display.PrimaryText);
+        AssertNull(display.MessageText);
+        return Task.CompletedTask;
+    }
+
+    private static Task DisplayPreservesRawTextElementOrder()
+    {
+        var notification = DisplayNotification(
+            title: "First",
+            body: "",
+            rawTextElements: ["First", "Second", "Second", "Third"]);
+
+        var display = NotificationDisplayMapper.Map(notification);
+
+        AssertEqual("Second\nSecond\nThird", display.MessageText);
+        return Task.CompletedTask;
+    }
+
+    private static Task DisplayPreservesMultilineText()
+    {
+        var notification = DisplayNotification(
+            title: "Title",
+            body: "  first\r\nsecond\nthird  ",
+            rawTextElements: ["Title", "first\r\nsecond\nthird"]);
+
+        var display = NotificationDisplayMapper.Map(notification);
+
+        AssertEqual("first\nsecond\nthird", display.MessageText);
+        return Task.CompletedTask;
+    }
+
+    private static Task DisplayPreservesUrlsTickersPricesEmojiAndSymbols()
+    {
+        const string body = "https://example.com?q=$NVDA $123.45 +4.2% 🚀 ✓ ?";
+        var notification = DisplayNotification(
+            title: "Market update",
+            body: body,
+            rawTextElements: ["Market update", body]);
+
+        var display = NotificationDisplayMapper.Map(notification);
+
+        AssertEqual(body, display.MessageText);
+        return Task.CompletedTask;
+    }
+
+    private static Task DisplayMappingDoesNotMutateRawValues()
+    {
+        const string title = "  Title\r\n";
+        const string body = "  Body\r\nLine  ";
+        var rawText = new[] { "  Title\r\n", "  Body\r\nLine  " };
+        var notification = DisplayNotification(
+            title: title,
+            body: body,
+            rawTextElements: rawText);
+
+        _ = NotificationDisplayMapper.Map(notification);
+
+        AssertEqual(title, notification.Title);
+        AssertEqual(body, notification.Body);
+        AssertSequenceEqual(rawText, notification.RawTextElements);
+        return Task.CompletedTask;
+    }
+
+    private static Task DisplayMappingIsDeterministic()
+    {
+        var notification = DisplayNotification(
+            title: "Title",
+            body: "Body",
+            rawTextElements: ["Title", "Body"]);
+
+        var first = NotificationDisplayMapper.Map(notification);
+        var second = NotificationDisplayMapper.Map(notification);
+
+        AssertEqual(first, second);
+        return Task.CompletedTask;
+    }
+
+    private static Task NormalTerminalOutputExcludesDebugMetadata()
+    {
+        var notification = DisplayNotification(
+            appDisplayName: "App One",
+            appId: "app.one",
+            windowsNotificationId: 101,
+            title: "Title",
+            body: "Body",
+            rawTextElements: ["Title", "Body"]);
+
+        var output = string.Join('\n', NotificationTerminalFormatter.FormatNotification(notification, includeDebugRaw: false));
+
+        AssertContains("12:00:00 · App One", output);
+        AssertContains("Title", output);
+        AssertContains("Body", output);
+        AssertDoesNotContain("App id:", output);
+        AssertDoesNotContain("Windows notification id:", output);
+        AssertDoesNotContain("Raw text elements:", output);
+        AssertDoesNotContain("Debug raw:", output);
+        AssertDoesNotContain("Event:", output);
+        AssertDoesNotContain("Enabled:", output);
+        return Task.CompletedTask;
+    }
+
+    private static Task DebugRawOutputIncludesRawValuesAndCodePoints()
+    {
+        var notification = DisplayNotification(
+            appDisplayName: "App One",
+            appId: "app.one",
+            windowsNotificationId: 102,
+            title: "?\uFFFD🚀\u2068",
+            body: "Body",
+            rawTextElements: ["?\uFFFD🚀\u2068", "Body"]);
+
+        var output = string.Join('\n', NotificationTerminalFormatter.FormatNotification(notification, includeDebugRaw: true));
+
+        AssertContains("Debug raw:", output);
+        AssertContains("Raw title:", output);
+        AssertContains("Derived primary text:", output);
+        AssertContains("App id: app.one", output);
+        AssertContains("Windows notification id: 102", output);
+        AssertContains("U+003F", output);
+        AssertContains("U+FFFD", output);
+        AssertContains("U+1F680", output);
+        AssertContains("U+2068", output);
+        return Task.CompletedTask;
+    }
+
     private static PollingNotificationCollector NewCollector(
         INotificationSnapshotProvider provider,
         FakeClock? clock = null)
@@ -465,6 +669,25 @@ internal static class Program
             Title: rawText.FirstOrDefault() ?? string.Empty,
             Body: rawText.Count > 1 ? string.Join(Environment.NewLine, rawText.Skip(1)) : string.Empty,
             RawTextElements: rawText);
+    }
+
+    private static CapturedNotification DisplayNotification(
+        string title,
+        string body,
+        IReadOnlyList<string> rawTextElements,
+        string appDisplayName = "App One",
+        string appId = "app.one",
+        uint windowsNotificationId = 100,
+        string creationTime = "2026-06-21T12:00:00+01:00")
+    {
+        return new CapturedNotification(
+            AppDisplayName: appDisplayName,
+            AppId: appId,
+            WindowsNotificationId: windowsNotificationId,
+            CreationTime: DateTimeOffset.Parse(creationTime),
+            Title: title,
+            Body: body,
+            RawTextElements: rawTextElements);
     }
 
     private static CollectorSnapshotResult SnapshotResult(
@@ -511,6 +734,30 @@ internal static class Program
         }
 
         return value;
+    }
+
+    private static void AssertNull<T>(T? value)
+    {
+        if (value is not null)
+        {
+            throw new InvalidOperationException($"Expected value to be null, got {value}.");
+        }
+    }
+
+    private static void AssertContains(string expected, string actual)
+    {
+        if (!actual.Contains(expected, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Expected output to contain {expected}.");
+        }
+    }
+
+    private static void AssertDoesNotContain(string unexpected, string actual)
+    {
+        if (actual.Contains(unexpected, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Expected output not to contain {unexpected}.");
+        }
     }
 
     private static void AssertSequenceEqual<T>(IReadOnlyList<T> expected, IReadOnlyList<T> actual)
