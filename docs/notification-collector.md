@@ -1,11 +1,12 @@
-# Windows Notification Collector
+# Windows Notification Collector And Dashboard
 
-This is a Windows notification collector with two modes:
+This is a Windows notification collector and compact browser dashboard with three modes:
 
 - terminal collector mode with `--listen`;
-- loopback HTTP API and Server-Sent Events mode with `--serve`.
+- loopback HTTP API and Server-Sent Events mode with `--serve`;
+- compiled React dashboard served by the same `--serve` process at `http://127.0.0.1:4827/`.
 
-It does not include the React UI, browser assets, `start.bat`, Discord-specific parsing, MSIX packaging, or AI filtering.
+It does not include `start.bat`, Discord-specific parsing, MSIX packaging, WebSockets, broad CORS, cloud services, telemetry, or AI filtering.
 
 The collector can persist enabled-source notifications to SQLite. Terminal content printing remains opt-in with `--print-content` because titles, bodies, and raw text elements may contain private information.
 
@@ -53,10 +54,51 @@ Retention cleanup deletes stored notifications older than 72 hours. It runs at s
 - Windows 11.
 - Windows PowerShell.
 - .NET 10 SDK available to Windows PowerShell.
+- Node.js 18 or newer for the React/Vite dashboard build.
 
 The repository can stay in WSL, but the executable must be built and launched by Windows PowerShell. Do not run the collector as a Linux/WSL process.
 
-## Build
+## Frontend Install And Build
+
+From WSL or another shell in the repository:
+
+```bash
+cd /home/houtang/GitHub/windows-clean-notifs/src/NotificationDashboard.Web
+npm install
+npm run build
+```
+
+`npm install` creates `package-lock.json`. `npm run build` writes compiled dashboard assets to:
+
+```text
+src/NotificationDashboard.Web/dist
+```
+
+The .NET project copies those compiled assets into `wwwroot` during build/publish. Build the frontend before publishing the Windows executable if you want `--serve` to host the browser dashboard.
+
+Run frontend tests:
+
+```bash
+cd /home/houtang/GitHub/windows-clean-notifs/src/NotificationDashboard.Web
+npm test
+```
+
+Run the Vite development server while the backend is already running:
+
+```bash
+cd /home/houtang/GitHub/windows-clean-notifs/src/NotificationDashboard.Web
+npm run dev
+```
+
+Vite binds to `127.0.0.1` and proxies `/api` to:
+
+```text
+http://127.0.0.1:4827
+```
+
+No broad CORS is enabled.
+
+## Backend Build
 
 From Windows PowerShell:
 
@@ -71,6 +113,13 @@ This writes the Windows executable to an ignored artifact folder under the WSL r
 ```
 
 Stop any running `NotificationInspector.exe` before publishing over the same output folder, because Windows locks files that are currently executing.
+
+If the frontend has been built first, the publish output includes:
+
+```text
+wwwroot\index.html
+wwwroot\assets\...
+```
 
 ## Check Or Grant Access
 
@@ -190,9 +239,9 @@ Disabled-source notification content is neither stored nor printed.
 
 Stop with `Ctrl+C`. Shutdown should print `Stopped.` without an unhandled exception.
 
-## Serve The Local API
+## Serve The Local Dashboard And API
 
-Server mode starts the same polling collector and a local ASP.NET Core minimal API in one process.
+Server mode starts the polling collector, local ASP.NET Core API, Server-Sent Events stream, and compiled React dashboard in one process.
 
 Default server mode:
 
@@ -209,7 +258,8 @@ Access status: Allowed
 Content printing is OFF. Enabled-source notifications will be stored but not printed.
 Newly discovered sources are disabled by default.
 Polling visible toast notifications every 1 seconds.
-Local API: http://127.0.0.1:4827
+Local dashboard: http://127.0.0.1:4827
+Local API: http://127.0.0.1:4827/api/health
 Press Ctrl+C to stop.
 ```
 
@@ -233,7 +283,65 @@ http://127.0.0.1:<port>
 
 It does not bind to `0.0.0.0`, does not expose notification data to the LAN, does not enable unrestricted CORS, and does not serve arbitrary files.
 
+Open the dashboard at:
+
+```text
+http://127.0.0.1:4827/
+```
+
+API routes remain under `/api`. Non-file browser routes fall back to `index.html` for the React app. File-like paths that are not compiled dashboard assets are not served.
+
+If `wwwroot\index.html` is missing from the executable output, `/` returns a clear message telling you to run:
+
+```bash
+cd /home/houtang/GitHub/windows-clean-notifs/src/NotificationDashboard.Web
+npm install
+npm run build
+```
+
+Then publish or run `--serve` again.
+
 If the port is already in use, startup prints a clear port-conflict message and exits.
+
+## Browser Dashboard Behaviour
+
+The dashboard is a compact single page with:
+
+- a merged newest-first feed from enabled sources;
+- live updates through `GET /api/events`;
+- a Sources panel backed by `GET /api/sources` and `PUT /api/sources/selection`;
+- a `Load older` button backed by `GET /api/notifications?limit=100&beforeId=<oldest-id>`.
+
+The UI renders only the API display fields:
+
+```text
+id
+appId
+sourceApp
+timestamp
+primaryText
+messageText
+```
+
+It does not render raw text elements, Windows notification IDs, captured timestamps, debug fields, or backend mapping internals.
+
+On startup, the dashboard calls:
+
+```text
+GET /api/health
+GET /api/notifications?limit=100
+GET /api/sources
+```
+
+It records the highest loaded notification ID and connects to:
+
+```text
+GET /api/events?afterId=<highest-loaded-id>
+```
+
+If a source is enabled or disabled in the Sources panel, the dashboard reloads the source list, reloads notifications from the API, removes notifications from disabled sources, and reconnects SSE from the highest remaining notification ID.
+
+Disabled-source notification content is still protected by the backend: disabled sources may be discovered and listed, but their title, body, and raw text are not stored or returned by the API.
 
 ## API Endpoints
 
@@ -379,6 +487,8 @@ SSE behaviour:
 - streams only currently enabled sources;
 - uses the same response model and `NotificationDisplayMapper` as `GET /api/notifications`;
 - `afterId` replays stored notifications with a higher SQLite notification ID before live events;
+- if `afterId` is absent, the `Last-Event-ID` request header is used for replay;
+- if both are present, `afterId` takes precedence;
 - subscriber queues are bounded;
 - heartbeat comments are sent periodically;
 - client disconnects clean up subscribers.
@@ -414,32 +524,45 @@ The tests cover:
 - derived display mapping and fallback rules;
 - preservation of URLs, tickers, prices, percentages, emoji, symbols, and multiline text in display mapping;
 - normal terminal output excluding debug metadata;
-- debug raw output including raw values and Unicode code-point diagnostics.
+- debug raw output including raw values and Unicode code-point diagnostics;
 - health endpoint;
 - source listing and source selection API;
 - notification pagination and enabled-source filtering;
 - API display mapping and raw-field exclusion;
-- SSE live delivery, `afterId` replay, disabled-source exclusion, and subscriber cleanup.
+- SSE live delivery, `afterId` and `Last-Event-ID` replay, disabled-source exclusion, and subscriber cleanup;
+- compiled frontend serving at `/`, SPA fallback, API route preservation, and repository-file non-exposure.
+
+Frontend tests are run separately from the dashboard folder:
+
+```bash
+cd /home/houtang/GitHub/windows-clean-notifs/src/NotificationDashboard.Web
+npm test
+```
+
+They cover initial loading, rendering, missing fields, multiline text, newest-first ordering, SSE insertion/deduplication/cleanup, loading older notifications, source toggles, API errors, and raw diagnostic field exclusion.
 
 ## Manual Verification
 
-1. Build the executable with the publish command above.
-2. Run `--check-access` and confirm it prints `Allowed`.
-3. Run `--listen` with no `--print-content`.
-4. Trigger a Discord notification and one notification from another app.
-5. Stop with `Ctrl+C`.
-6. Run `--list-sources` and confirm both apps appear as `Enabled: false`.
-7. Enable Discord using the exact Discord app ID from `--list-sources`.
-8. Run `--listen --print-content`.
-9. Trigger a new Discord notification and confirm it prints once in concise display form.
-10. Trigger a notification from the still-disabled other app and confirm its content does not print.
-11. Leave the same Discord toast visible for several polls and confirm it does not print repeatedly.
-12. Trigger rapid Discord notifications and confirm each visible notification appears once.
-13. Run with `--listen --print-content --debug-raw`, trigger one enabled-source notification, and confirm raw fields plus Unicode code points print only in debug mode.
-14. Start server mode with `--serve`.
-15. Open `http://127.0.0.1:4827/api/health` and confirm JSON is returned.
-16. Run `curl.exe -N http://127.0.0.1:4827/api/events`.
-17. Trigger an enabled-source notification and confirm one `event: notification` SSE event is printed.
-18. Stop with `Ctrl+C` and confirm shutdown is clean.
+1. Build the frontend with `npm run build`.
+2. Publish the Windows executable with the publish command above.
+3. Run `--check-access` and confirm it prints `Allowed`.
+4. Run `--listen` with no `--print-content`.
+5. Trigger a Discord notification and one notification from another app.
+6. Stop with `Ctrl+C`.
+7. Run `--list-sources` and confirm both apps appear as `Enabled: false`.
+8. Start server mode with `--serve`.
+9. Open `http://127.0.0.1:4827/` and confirm the dashboard loads.
+10. Open Sources.
+11. Enable Discord or another detected source.
+12. Trigger a notification from that enabled source.
+13. Confirm it appears once at the top of the feed without refreshing.
+14. Trigger a multiline or long notification and confirm line breaks and full text are preserved.
+15. Trigger a notification from a disabled source and confirm it does not appear in the feed.
+16. Disable the enabled source and confirm its notifications disappear from the feed.
+17. Restart `--serve` and confirm the source selection persists.
+18. Open `http://127.0.0.1:4827/api/health` and confirm JSON is returned.
+19. Run `curl.exe -N http://127.0.0.1:4827/api/events`.
+20. Trigger an enabled-source notification and confirm one `event: notification` SSE event is printed.
+21. Stop with `Ctrl+C` and confirm shutdown is clean.
 
 Because disabled-source content is intentionally not stored, use the automated tests to verify the SQLite privacy rule directly.
