@@ -123,7 +123,7 @@ Cleanup belongs in a shared display mapper when reading notification data for di
 
 Discord context is derived separately from raw stored notification fields when reading for API, SSE, or UI display. It is best-effort presentation metadata only:
 
-- use it for server tabs and channel columns in the Discord view;
+- use it for channel columns in the Discord view;
 - preserve generic `primaryText` and `messageText`;
 - return an unknown/fallback context when Discord text cannot be parsed;
 - never hide a notification because parsing failed.

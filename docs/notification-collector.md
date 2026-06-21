@@ -8,7 +8,7 @@ This is a Windows notification collector and compact browser dashboard with thre
 
 It does not include `start.bat`, MSIX packaging, WebSockets, broad CORS, cloud services, telemetry, or AI filtering.
 
-The dashboard includes an optional Discord view that derives server/channel presentation metadata from stored Discord notification text. That metadata is best-effort and does not affect capture, source selection, storage, deduplication, or retention.
+The dashboard includes an optional Discord view that derives channel presentation metadata from stored Discord notification text. That metadata is best-effort and does not affect capture, source selection, storage, deduplication, or retention.
 
 The collector can persist enabled-source notifications to SQLite. Terminal content printing remains opt-in with `--print-content` because titles, bodies, and raw text elements may contain private information.
 
@@ -428,7 +428,7 @@ Example recovery:
 The dashboard is a compact single page with:
 
 - a merged newest-first feed from enabled sources;
-- an optional Discord view with server tabs and channel columns when Discord is enabled;
+- an optional Discord view with channel columns when Discord is enabled;
 - live updates through `GET /api/events`;
 - a Sources panel backed by `GET /api/sources` and `PUT /api/sources/selection`;
 - a `Load older` button backed by `GET /api/notifications?limit=100&beforeId=<oldest-id>`.
@@ -574,13 +574,13 @@ Example response:
     "sourceApp": "Discord",
     "timestamp": "2026-06-21T13:32:08.0000000Z",
     "primaryText": "Scanner Bot",
-    "messageText": "NVDA breaking premarket high",
-    "discord": {
-      "sender": "Scanner Bot",
-      "server": "Main Chat",
-      "channel": "#stocks-and-options",
-      "confidence": "parsed"
-    }
+      "messageText": "NVDA breaking premarket high",
+      "discord": {
+        "sender": "Scanner Bot",
+        "context": "Main Chat",
+        "channel": "#stocks-and-options",
+        "confidence": "parsed"
+      }
   }
 ]
 ```
@@ -608,7 +608,7 @@ Event shape:
 ```text
 event: notification
 id: 1235
-data: {"id":1235,"appId":"com.squirrel.Discord.Discord","sourceApp":"Discord","timestamp":"2026-06-21T13:32:08.0000000Z","primaryText":"Scanner Bot","messageText":"NVDA breaking premarket high","discord":{"sender":"Scanner Bot","server":"Main Chat","channel":"#stocks-and-options","confidence":"parsed"}}
+data: {"id":1235,"appId":"com.squirrel.Discord.Discord","sourceApp":"Discord","timestamp":"2026-06-21T13:32:08.0000000Z","primaryText":"Scanner Bot","messageText":"NVDA breaking premarket high","discord":{"sender":"Scanner Bot","context":"Main Chat","channel":"#stocks-and-options","confidence":"parsed"}}
 ```
 
 SSE behaviour:

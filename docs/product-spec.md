@@ -7,7 +7,7 @@ Build a lightweight, local Windows 11 dashboard that displays notifications only
 
 **Success condition:** I can work with Discord closed to the taskbar or minimised and still see its notifications in a compact live feed.
 
-The product remains a local Windows notification dashboard first. Capture, source selection, storage, retention, and privacy must stay generic. Discord may receive an optional enhanced presentation because Discord Windows notifications expose useful sender, channel, and server text.
+The product remains a local Windows notification dashboard first. Capture, source selection, storage, retention, and privacy must stay generic. Discord may receive an optional enhanced presentation because Discord Windows notifications expose useful sender and channel text.
 
 ## Core user flow
 
@@ -19,7 +19,7 @@ The product remains a local Windows notification dashboard first. Capture, sourc
 6. The user opens **Sources** and enables applications such as Discord.
 7. New notifications from enabled applications appear automatically.
 8. The user can use the generic **Feed** view for all enabled sources.
-9. When Discord is enabled, the user can switch to a Discord-focused view with server tabs and channel columns.
+9. When Discord is enabled, the user can switch to a Discord-focused view with one column per notifying channel.
 
 Closing the browser tab does not stop collection. Closing the terminal process stops the application.
 
@@ -91,8 +91,7 @@ When Discord is enabled, the app may offer an explicit **Discord** view. This vi
 
 Layout:
 
-- Discord server names appear as tabs.
-- Within the selected server tab, channels appear as columns.
+- Discord channels appear as columns.
 - Each column shows newest-first notifications for that channel.
 - Direct messages, group DMs, or unparsable Discord notifications appear in an **Ungrouped** or equivalent fallback area.
 - Switching view modes does not change source selection, storage, retention, or notification capture.
@@ -102,7 +101,7 @@ Derived Discord fields:
 ```ts
 type DiscordNotificationContext = {
   sender?: string;
-  server?: string;
+  context?: string;
   channel?: string;
   confidence: "parsed" | "unknown";
 };
@@ -111,7 +110,7 @@ type DiscordNotificationContext = {
 The parser is best-effort. It may use observed Discord Windows notification title shapes such as:
 
 ```text
-Sender (#channel, Server Name)
+Sender (#channel, Context Label)
 ```
 
 Parsing rules:
@@ -121,14 +120,14 @@ Parsing rules:
 - Do not require Discord context for storing or deduplicating notifications.
 - Do not hide or drop notifications when parsing fails.
 - Do not rely on Discord server IDs, channel IDs, bot tokens, or Discord APIs in V1.
-- Treat server and channel names as display labels, not stable identifiers.
+- Treat channel names and context labels as display labels, not stable identifiers.
 - Strip invisible formatting marks only from derived grouping keys when needed; do not mutate stored raw text.
 
 Discord view limitations:
 
 - Discord can change Windows notification text formatting.
-- Server or channel renames may create new display groups.
-- Channels with the same display name in the same server may be indistinguishable.
+- Channel renames may create new display groups.
+- Channels with the same display name in different Discord servers may be indistinguishable because Windows notifications do not reliably expose true server identity.
 - The view only contains notifications that Windows exposes and the collector captures.
 
 ## Retention and privacy
@@ -231,7 +230,7 @@ The dashboard displays notifications that applications successfully publish to W
 - Feed updates live and orders items newest first.
 - Full available title/body text wraps cleanly.
 - Generic feed mode remains available for all enabled sources.
-- When Discord is enabled, an explicit Discord view can group parsed Discord notifications by server and channel.
+- When Discord is enabled, an explicit Discord view can group parsed Discord notifications by channel.
 - Discord notifications that cannot be parsed still remain visible in a fallback group.
 - Records survive restart and expire after 72 hours or when the 2,000-record limit is exceeded.
 - All content remains on the local computer.
@@ -240,7 +239,7 @@ The dashboard displays notifications that applications successfully publish to W
 
 - Discord API integration, bot tokens, or guaranteed Discord message archive behaviour.
 - Discord replies, reactions, avatars, attachments, or click-through actions.
-- Persistent server/channel selection settings.
+- Server tabs or persistent channel selection settings.
 - Source-aware layouts for applications other than Discord unless explicitly specified.
 - AI or keyword filtering.
 - Generic notification replies, actions, links, or opening the source application.
