@@ -54,6 +54,8 @@ The list grows only when a previously unseen application produces a Windows noti
 
 The app has a generic notification view and may have source-aware enhanced views.
 
+The dashboard supports explicit **Light** and **Night** visual modes. The selected theme is stored locally in the browser and does not affect notification capture, source selection, storage, retention, or API behaviour.
+
 ### Generic Feed
 
 Use one merged, vertically scrolling feed for all enabled applications.
