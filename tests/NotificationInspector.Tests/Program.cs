@@ -1,3 +1,11 @@
+using System.Globalization;
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Logging;
 using WindowsCleanNotifs.NotificationInspector;
 
 namespace WindowsCleanNotifs.NotificationInspector.Tests;
@@ -35,7 +43,22 @@ internal static class Program
             ("display does not mutate raw values", DisplayMappingDoesNotMutateRawValues),
             ("display mapping is deterministic", DisplayMappingIsDeterministic),
             ("normal terminal output excludes debug metadata", NormalTerminalOutputExcludesDebugMetadata),
-            ("debug raw output includes code points", DebugRawOutputIncludesRawValuesAndCodePoints)
+            ("debug raw output includes code points", DebugRawOutputIncludesRawValuesAndCodePoints),
+            ("api health endpoint", ApiHealthEndpoint),
+            ("api source listing and ordering", ApiSourceListingAndOrdering),
+            ("api source selection persists", ApiEnablingAndDisablingSourcePersists),
+            ("api malformed source selection returns 400", ApiMalformedSourceSelectionReturns400),
+            ("api unknown source returns 404", ApiUnknownSourceReturns404),
+            ("api notification limit validation", ApiNotificationLimitValidation),
+            ("api cursor pagination", ApiCursorPagination),
+            ("api newest-first ordering", ApiNewestFirstOrdering),
+            ("api excludes disabled-source notifications", ApiDisabledSourceNotificationsAreExcluded),
+            ("api responses use display mapper", ApiResponsesUseDisplayMapper),
+            ("api excludes raw diagnostic fields", ApiRawDiagnosticFieldsAreNotExposed),
+            ("sse streams stored notification once", SseStoredNotificationReachesSubscriberOnce),
+            ("sse afterId replay returns newer notifications", SseAfterIdReplayReturnsOnlyNewerNotifications),
+            ("sse excludes disabled-source notifications", SseDisabledSourceNotificationsAreNotStreamed),
+            ("sse cancellation cleans subscriber", SseCancellationCleansSubscriber)
         };
 
         var failures = 0;
@@ -49,7 +72,7 @@ internal static class Program
             catch (Exception ex)
             {
                 failures++;
-                Console.Error.WriteLine($"FAIL {test.Name}: {ex.Message}");
+                Console.Error.WriteLine($"FAIL {test.Name}: {ex.GetType().Name}: {ex.Message}");
             }
         }
 
@@ -642,6 +665,281 @@ internal static class Program
         return Task.CompletedTask;
     }
 
+    private static async Task ApiHealthEndpoint()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+
+        var response = await host.Client.GetAsync("/api/health");
+        var json = await ReadJsonObjectAsync(response);
+
+        AssertEqual(HttpStatusCode.OK, response.StatusCode);
+        AssertEqual("ok", json.RootElement.GetProperty("status").GetString());
+        AssertEqual("Allowed", json.RootElement.GetProperty("listenerAccessStatus").GetString());
+        AssertEqual(true, json.RootElement.GetProperty("collectorRunning").GetBoolean());
+        AssertEqual("00:00:01", json.RootElement.GetProperty("pollingInterval").GetString());
+        AssertEqual("3.00:00:00", json.RootElement.GetProperty("retentionPeriod").GetString());
+    }
+
+    private static async Task ApiSourceListingAndOrdering()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        await AddSourceAsync(host.Store, "Beta", "app.beta", enabled: false, "2026-06-21T12:00:00+01:00");
+        await AddSourceAsync(host.Store, "Zulu", "app.zulu", enabled: true, "2026-06-21T12:00:01+01:00");
+        await AddSourceAsync(host.Store, "Alpha", "app.alpha", enabled: true, "2026-06-21T12:00:02+01:00");
+
+        var response = await host.Client.GetAsync("/api/sources");
+        var json = await ReadJsonArrayAsync(response);
+        var sources = json.RootElement.EnumerateArray().ToArray();
+
+        AssertEqual(HttpStatusCode.OK, response.StatusCode);
+        AssertEqual(3, sources.Length);
+        AssertEqual("app.alpha", sources[0].GetProperty("appId").GetString());
+        AssertEqual(true, sources[0].GetProperty("enabled").GetBoolean());
+        AssertEqual("app.zulu", sources[1].GetProperty("appId").GetString());
+        AssertEqual(true, sources[1].GetProperty("enabled").GetBoolean());
+        AssertEqual("app.beta", sources[2].GetProperty("appId").GetString());
+        AssertEqual(false, sources[2].GetProperty("enabled").GetBoolean());
+    }
+
+    private static async Task ApiEnablingAndDisablingSourcePersists()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        await AddSourceAsync(host.Store, "App One", "app.one", enabled: false, "2026-06-21T12:01:00+01:00");
+
+        var enable = await PutSourceSelectionAsync(host, "app.one", enabled: true);
+        var enabledJson = await ReadJsonObjectAsync(enable);
+        AssertEqual(HttpStatusCode.OK, enable.StatusCode);
+        AssertEqual(true, enabledJson.RootElement.GetProperty("enabled").GetBoolean());
+
+        var enabledSource = AssertNotNull(await host.Store.GetSourceAsync("app.one", CancellationToken.None));
+        AssertEqual(true, enabledSource.Enabled);
+
+        var disable = await PutSourceSelectionAsync(host, "app.one", enabled: false);
+        var disabledJson = await ReadJsonObjectAsync(disable);
+        AssertEqual(HttpStatusCode.OK, disable.StatusCode);
+        AssertEqual(false, disabledJson.RootElement.GetProperty("enabled").GetBoolean());
+
+        var disabledSource = AssertNotNull(await host.Store.GetSourceAsync("app.one", CancellationToken.None));
+        AssertEqual(false, disabledSource.Enabled);
+    }
+
+    private static async Task ApiUnknownSourceReturns404()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+
+        var response = await PutSourceSelectionAsync(host, "missing.app", enabled: true);
+
+        AssertEqual(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    private static async Task ApiMalformedSourceSelectionReturns400()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+
+        var missingEnabled = new StringContent(
+            """{"appId":"app.one"}""",
+            Encoding.UTF8,
+            "application/json");
+        var missingEnabledResponse = await host.Client.PutAsync("/api/sources/selection", missingEnabled);
+
+        var missingAppId = new StringContent(
+            """{"enabled":true}""",
+            Encoding.UTF8,
+            "application/json");
+        var missingAppIdResponse = await host.Client.PutAsync("/api/sources/selection", missingAppId);
+
+        AssertEqual(HttpStatusCode.BadRequest, missingEnabledResponse.StatusCode);
+        AssertEqual(HttpStatusCode.BadRequest, missingAppIdResponse.StatusCode);
+    }
+
+    private static async Task ApiNotificationLimitValidation()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+
+        var tooLarge = await host.Client.GetAsync("/api/notifications?limit=501");
+        var zero = await host.Client.GetAsync("/api/notifications?limit=0");
+        var invalid = await host.Client.GetAsync("/api/notifications?limit=not-a-number");
+
+        AssertEqual(HttpStatusCode.BadRequest, tooLarge.StatusCode);
+        AssertEqual(HttpStatusCode.BadRequest, zero.StatusCode);
+        AssertEqual(HttpStatusCode.BadRequest, invalid.StatusCode);
+    }
+
+    private static async Task ApiCursorPagination()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        await AddSourceAsync(host.Store, "App One", "app.one", enabled: true, "2026-06-21T12:03:00+01:00");
+        var first = await InsertNotificationAsync(host.Store, "App One", "app.one", 201, "2026-06-21T12:03:01+01:00");
+        var second = await InsertNotificationAsync(host.Store, "App One", "app.one", 202, "2026-06-21T12:03:02+01:00");
+        var third = await InsertNotificationAsync(host.Store, "App One", "app.one", 203, "2026-06-21T12:03:03+01:00");
+
+        var firstPage = await host.Client.GetAsync("/api/notifications?limit=2");
+        var firstPageJson = await ReadJsonArrayAsync(firstPage);
+        var firstPageItems = firstPageJson.RootElement.EnumerateArray().ToArray();
+
+        AssertEqual(2, firstPageItems.Length);
+        AssertEqual(third.Id, firstPageItems[0].GetProperty("id").GetInt64());
+        AssertEqual(second.Id, firstPageItems[1].GetProperty("id").GetInt64());
+
+        var nextPage = await host.Client.GetAsync($"/api/notifications?beforeId={second.Id.ToString(CultureInfo.InvariantCulture)}");
+        var nextPageJson = await ReadJsonArrayAsync(nextPage);
+        var nextPageItems = nextPageJson.RootElement.EnumerateArray().ToArray();
+
+        AssertEqual(1, nextPageItems.Length);
+        AssertEqual(first.Id, nextPageItems[0].GetProperty("id").GetInt64());
+    }
+
+    private static async Task ApiNewestFirstOrdering()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        await AddSourceAsync(host.Store, "App One", "app.one", enabled: true, "2026-06-21T12:04:00+01:00");
+        var first = await InsertNotificationAsync(host.Store, "App One", "app.one", 211, "2026-06-21T12:04:01+01:00");
+        var second = await InsertNotificationAsync(host.Store, "App One", "app.one", 212, "2026-06-21T12:04:02+01:00");
+        var third = await InsertNotificationAsync(host.Store, "App One", "app.one", 213, "2026-06-21T12:04:03+01:00");
+
+        var response = await host.Client.GetAsync("/api/notifications");
+        var json = await ReadJsonArrayAsync(response);
+        var items = json.RootElement.EnumerateArray().ToArray();
+
+        AssertEqual(3, items.Length);
+        AssertEqual(third.Id, items[0].GetProperty("id").GetInt64());
+        AssertEqual(second.Id, items[1].GetProperty("id").GetInt64());
+        AssertEqual(first.Id, items[2].GetProperty("id").GetInt64());
+    }
+
+    private static async Task ApiDisabledSourceNotificationsAreExcluded()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        await AddSourceAsync(host.Store, "Enabled App", "app.enabled", enabled: true, "2026-06-21T12:05:00+01:00");
+        await AddSourceAsync(host.Store, "Disabled App", "app.disabled", enabled: true, "2026-06-21T12:05:01+01:00");
+        var enabled = await InsertNotificationAsync(host.Store, "Enabled App", "app.enabled", 221, "2026-06-21T12:05:02+01:00");
+        var disabled = await InsertNotificationAsync(host.Store, "Disabled App", "app.disabled", 222, "2026-06-21T12:05:03+01:00");
+        await host.Store.SetSourceEnabledAsync("app.disabled", false, CancellationToken.None);
+
+        var response = await host.Client.GetAsync("/api/notifications");
+        var json = await ReadJsonArrayAsync(response);
+        var items = json.RootElement.EnumerateArray().ToArray();
+
+        AssertEqual(1, items.Length);
+        AssertEqual(enabled.Id, items[0].GetProperty("id").GetInt64());
+        AssertEqual(false, items.Any(item => item.GetProperty("id").GetInt64() == disabled.Id));
+    }
+
+    private static async Task ApiResponsesUseDisplayMapper()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        await AddSourceAsync(host.Store, "App One", "app.one", enabled: true, "2026-06-21T12:06:00+01:00");
+        var notification = new CapturedNotification(
+            AppDisplayName: "App One",
+            AppId: "app.one",
+            WindowsNotificationId: 231,
+            CreationTime: DateTimeOffset.Parse("2026-06-21T12:06:01+01:00"),
+            Title: "  Title  ",
+            Body: "  Body  ",
+            RawTextElements: ["  Title  ", "  Body  "]);
+        await InsertNotificationAsync(host.Store, notification, DateTimeOffset.Parse("2026-06-21T12:06:02+01:00"));
+
+        var response = await host.Client.GetAsync("/api/notifications");
+        var json = await ReadJsonArrayAsync(response);
+        var item = json.RootElement.EnumerateArray().Single();
+
+        AssertEqual("App One", item.GetProperty("sourceApp").GetString());
+        AssertEqual("Title", item.GetProperty("primaryText").GetString());
+        AssertEqual("Body", item.GetProperty("messageText").GetString());
+        AssertEqual("2026-06-21T11:06:01.0000000Z", item.GetProperty("timestamp").GetString());
+    }
+
+    private static async Task ApiRawDiagnosticFieldsAreNotExposed()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        await AddSourceAsync(host.Store, "App One", "app.one", enabled: true, "2026-06-21T12:07:00+01:00");
+        await InsertNotificationAsync(host.Store, "App One", "app.one", 241, "2026-06-21T12:07:01+01:00");
+
+        var response = await host.Client.GetAsync("/api/notifications");
+        var body = await response.Content.ReadAsStringAsync();
+
+        AssertDoesNotContain("rawText", body);
+        AssertDoesNotContain("rawTextElements", body);
+        AssertDoesNotContain("windowsNotificationId", body);
+        AssertDoesNotContain("capturedAt", body);
+        AssertDoesNotContain("body", body);
+        AssertDoesNotContain("title", body);
+    }
+
+    private static async Task SseStoredNotificationReachesSubscriberOnce()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        await AddSourceAsync(host.Store, "App One", "app.one", enabled: true, "2026-06-21T12:08:00+01:00");
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var response = await host.Client.GetAsync("/api/events", HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        await using var stream = await response.Content.ReadAsStreamAsync(cts.Token);
+        var reader = new SseReader(stream);
+        await WaitForSubscriberCountAsync(host.Hub, 1, cts.Token);
+
+        var stored = await InsertNotificationAsync(host.Store, "App One", "app.one", 251, "2026-06-21T12:08:01+01:00");
+        AssertEqual(true, await NotificationPublisher.PublishStoredNotificationAsync(host.Store, host.Hub, stored, cts.Token));
+
+        var notification = await reader.ReadNextNotificationAsync(cts.Token);
+
+        AssertEqual(stored.Id, notification.Id);
+        AssertEqual("app.one", notification.AppId);
+    }
+
+    private static async Task SseAfterIdReplayReturnsOnlyNewerNotifications()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        await AddSourceAsync(host.Store, "App One", "app.one", enabled: true, "2026-06-21T12:09:00+01:00");
+        var first = await InsertNotificationAsync(host.Store, "App One", "app.one", 261, "2026-06-21T12:09:01+01:00");
+        var second = await InsertNotificationAsync(host.Store, "App One", "app.one", 262, "2026-06-21T12:09:02+01:00");
+        var third = await InsertNotificationAsync(host.Store, "App One", "app.one", 263, "2026-06-21T12:09:03+01:00");
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var response = await host.Client.GetAsync($"/api/events?afterId={first.Id.ToString(CultureInfo.InvariantCulture)}", HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        await using var stream = await response.Content.ReadAsStreamAsync(cts.Token);
+        var reader = new SseReader(stream);
+
+        var replaySecond = await reader.ReadNextNotificationAsync(cts.Token);
+        var replayThird = await reader.ReadNextNotificationAsync(cts.Token);
+
+        AssertEqual(second.Id, replaySecond.Id);
+        AssertEqual(third.Id, replayThird.Id);
+    }
+
+    private static async Task SseDisabledSourceNotificationsAreNotStreamed()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        await AddSourceAsync(host.Store, "App One", "app.one", enabled: true, "2026-06-21T12:10:00+01:00");
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var response = await host.Client.GetAsync("/api/events", HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        await using var stream = await response.Content.ReadAsStreamAsync(cts.Token);
+        var reader = new SseReader(stream);
+        await WaitForSubscriberCountAsync(host.Hub, 1, cts.Token);
+
+        var stored = await InsertNotificationAsync(host.Store, "App One", "app.one", 271, "2026-06-21T12:10:01+01:00");
+        await host.Store.SetSourceEnabledAsync("app.one", false, CancellationToken.None);
+
+        AssertEqual(false, await NotificationPublisher.PublishStoredNotificationAsync(host.Store, host.Hub, stored, cts.Token));
+        await AssertNoSseNotificationAsync(reader);
+    }
+
+    private static async Task SseCancellationCleansSubscriber()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var response = await host.Client.GetAsync("/api/events", HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        await using var stream = await response.Content.ReadAsStreamAsync(cts.Token);
+        await WaitForSubscriberCountAsync(host.Hub, 1, cts.Token);
+
+        cts.Cancel();
+        response.Dispose();
+
+        using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await WaitForSubscriberCountAsync(host.Hub, 0, cleanupCts.Token);
+    }
+
     private static PollingNotificationCollector NewCollector(
         INotificationSnapshotProvider provider,
         FakeClock? clock = null)
@@ -690,6 +988,59 @@ internal static class Program
             RawTextElements: rawTextElements);
     }
 
+    private static async Task AddSourceAsync(
+        INotificationStore store,
+        string appDisplayName,
+        string appId,
+        bool enabled,
+        string seenAt)
+    {
+        await store.UpsertSourceAsync(
+            new NotificationSource(appDisplayName, appId),
+            DateTimeOffset.Parse(seenAt),
+            CancellationToken.None);
+
+        if (enabled)
+        {
+            await store.SetSourceEnabledAsync(appId, true, CancellationToken.None);
+        }
+    }
+
+    private static async Task<HttpResponseMessage> PutSourceSelectionAsync(
+        ApiTestHost host,
+        string appId,
+        bool enabled)
+    {
+        var content = new StringContent(
+            $$"""{"appId":"{{appId}}","enabled":{{enabled.ToString().ToLowerInvariant()}}}""",
+            Encoding.UTF8,
+            "application/json");
+        return await host.Client.PutAsync("/api/sources/selection", content);
+    }
+
+    private static async Task<StoredNotificationRecord> InsertNotificationAsync(
+        INotificationStore store,
+        string appDisplayName,
+        string appId,
+        uint windowsNotificationId,
+        string creationTime)
+    {
+        return await InsertNotificationAsync(
+            store,
+            Notification(appDisplayName, appId, windowsNotificationId, creationTime),
+            DateTimeOffset.Parse(creationTime).AddSeconds(1));
+    }
+
+    private static async Task<StoredNotificationRecord> InsertNotificationAsync(
+        INotificationStore store,
+        CapturedNotification notification,
+        DateTimeOffset capturedAt)
+    {
+        var result = await store.TryInsertNotificationAsync(notification, capturedAt, CancellationToken.None);
+        AssertEqual(NotificationInsertStatus.Stored, result.Status);
+        return AssertNotNull(result.Notification);
+    }
+
     private static CollectorSnapshotResult SnapshotResult(
         string observedAt,
         IReadOnlyList<NotificationSource>? seenSources = null,
@@ -716,6 +1067,118 @@ internal static class Program
             CancellationToken.None);
         await store.SetSourceEnabledAsync(appId, true, CancellationToken.None);
         return store;
+    }
+
+    private static async Task<JsonDocument> ReadJsonObjectAsync(HttpResponseMessage response)
+    {
+        var content = await response.Content.ReadAsStringAsync();
+        var document = JsonDocument.Parse(content);
+        AssertEqual(JsonValueKind.Object, document.RootElement.ValueKind);
+        return document;
+    }
+
+    private static async Task<JsonDocument> ReadJsonArrayAsync(HttpResponseMessage response)
+    {
+        var content = await response.Content.ReadAsStringAsync();
+        var document = JsonDocument.Parse(content);
+        AssertEqual(JsonValueKind.Array, document.RootElement.ValueKind);
+        return document;
+    }
+
+    private static async Task AssertNoSseNotificationAsync(SseReader reader)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+        try
+        {
+            var notification = await reader.ReadNextNotificationAsync(timeout.Token);
+            throw new InvalidOperationException($"Expected no SSE notification, got {notification.Id}.");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (IOException) when (timeout.IsCancellationRequested)
+        {
+        }
+    }
+
+    private sealed class SseReader
+    {
+        private readonly StreamReader _reader;
+
+        public SseReader(Stream stream)
+        {
+            _reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
+        }
+
+        public async Task<NotificationResponse> ReadNextNotificationAsync(CancellationToken cancellationToken)
+        {
+            while (true)
+            {
+                string? eventName = null;
+                string? id = null;
+                string? data = null;
+
+                while (true)
+                {
+                    var line = await _reader.ReadLineAsync(cancellationToken);
+                    if (line is null)
+                    {
+                        throw new InvalidOperationException("SSE stream ended before a notification event was received.");
+                    }
+
+                    if (line.Length == 0)
+                    {
+                        break;
+                    }
+
+                    if (line.StartsWith(":", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    if (line.StartsWith("event:", StringComparison.Ordinal))
+                    {
+                        eventName = line["event:".Length..].Trim();
+                    }
+                    else if (line.StartsWith("id:", StringComparison.Ordinal))
+                    {
+                        id = line["id:".Length..].Trim();
+                    }
+                    else if (line.StartsWith("data:", StringComparison.Ordinal))
+                    {
+                        data = line["data:".Length..].Trim();
+                    }
+                }
+
+                if (eventName != "notification")
+                {
+                    continue;
+                }
+
+                var notification = JsonSerializer.Deserialize<NotificationResponse>(
+                    data ?? throw new InvalidOperationException("SSE notification event had no data."),
+                    new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                    ?? throw new InvalidOperationException("SSE notification event data could not be parsed.");
+
+                if (id is not null)
+                {
+                    AssertEqual(long.Parse(id, CultureInfo.InvariantCulture), notification.Id);
+                }
+
+                return notification;
+            }
+        }
+    }
+
+    private static async Task WaitForSubscriberCountAsync(
+        NotificationEventHub hub,
+        int expected,
+        CancellationToken cancellationToken)
+    {
+        while (hub.SubscriberCount != expected)
+        {
+            await Task.Delay(10, cancellationToken);
+        }
     }
 
     private static void AssertEqual<T>(T expected, T actual)
@@ -802,6 +1265,75 @@ internal static class Program
         public void Advance(TimeSpan amount)
         {
             _current += amount;
+        }
+    }
+
+    private sealed class ApiTestHost : IAsyncDisposable
+    {
+        private readonly TestDatabase _testDb;
+        private readonly WebApplication _app;
+
+        private ApiTestHost(
+            TestDatabase testDb,
+            WebApplication app,
+            HttpClient client,
+            SqliteNotificationStore store,
+            NotificationEventHub hub)
+        {
+            _testDb = testDb;
+            _app = app;
+            Client = client;
+            Store = store;
+            Hub = hub;
+        }
+
+        public HttpClient Client { get; }
+
+        public SqliteNotificationStore Store { get; }
+
+        public NotificationEventHub Hub { get; }
+
+        public static async Task<ApiTestHost> CreateAsync()
+        {
+            var testDb = TestDatabase.Create();
+            var store = await testDb.OpenStoreAsync();
+            var hub = new NotificationEventHub(capacity: 10);
+            var state = new NotificationServerState();
+            state.SetListenerAccessStatus("Allowed");
+            state.SetCollectorRunning(true);
+
+            var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+            {
+                Args = [],
+                EnvironmentName = "Production"
+            });
+            builder.WebHost.UseTestServer();
+            builder.Logging.ClearProviders();
+            NotificationApi.ConfigureServices(
+                builder.Services,
+                store,
+                hub,
+                state,
+                new NotificationApiOptions(TimeSpan.FromSeconds(1), TimeSpan.FromHours(72)));
+
+            var app = builder.Build();
+            NotificationApi.MapEndpoints(app);
+            await app.StartAsync();
+
+            return new ApiTestHost(
+                testDb,
+                app,
+                app.GetTestClient(),
+                store,
+                hub);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Client.Dispose();
+            await _app.StopAsync();
+            await _app.DisposeAsync();
+            _testDb.Delete();
         }
     }
 
