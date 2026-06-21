@@ -55,6 +55,9 @@ internal static class Program
             ("api excludes disabled-source notifications", ApiDisabledSourceNotificationsAreExcluded),
             ("api responses use display mapper", ApiResponsesUseDisplayMapper),
             ("api excludes raw diagnostic fields", ApiRawDiagnosticFieldsAreNotExposed),
+            ("api parses Discord context", ApiParsesDiscordContext),
+            ("api marks unknown Discord context", ApiMarksUnknownDiscordContext),
+            ("api omits Discord context for other apps", ApiOmitsDiscordContextForOtherApps),
             ("sse streams stored notification once", SseStoredNotificationReachesSubscriberOnce),
             ("sse afterId replay returns newer notifications", SseAfterIdReplayReturnsOnlyNewerNotifications),
             ("sse Last-Event-ID replay returns newer notifications", SseLastEventIdReplayReturnsOnlyNewerNotifications),
@@ -876,6 +879,75 @@ internal static class Program
         AssertDoesNotContain("capturedAt", body);
         AssertDoesNotContain("body", body);
         AssertDoesNotContain("title", body);
+    }
+
+    private static async Task ApiParsesDiscordContext()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        const string appId = "com.squirrel.Discord.Discord";
+        const string title = "\u2068Trader Bot\u2069 (\u2068#stocks-and-options\u2069, \u2068Main Chat\u2069)";
+        await AddSourceAsync(host.Store, "Discord", appId, enabled: true, "2026-06-21T12:07:10+01:00");
+        await InsertNotificationAsync(
+            host.Store,
+            new CapturedNotification(
+                AppDisplayName: "Discord",
+                AppId: appId,
+                WindowsNotificationId: 242,
+                CreationTime: DateTimeOffset.Parse("2026-06-21T12:07:11+01:00"),
+                Title: title,
+                Body: "NVDA breaking premarket high",
+                RawTextElements: [title, "NVDA breaking premarket high"]),
+            DateTimeOffset.Parse("2026-06-21T12:07:12+01:00"));
+
+        var response = await host.Client.GetAsync("/api/notifications");
+        var json = await ReadJsonArrayAsync(response);
+        var item = json.RootElement.EnumerateArray().Single();
+        var discord = item.GetProperty("discord");
+
+        AssertEqual("parsed", discord.GetProperty("confidence").GetString());
+        AssertEqual("Trader Bot", discord.GetProperty("sender").GetString());
+        AssertEqual("#stocks-and-options", discord.GetProperty("channel").GetString());
+        AssertEqual("Main Chat", discord.GetProperty("server").GetString());
+    }
+
+    private static async Task ApiMarksUnknownDiscordContext()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        const string appId = "com.squirrel.Discord.Discord";
+        await AddSourceAsync(host.Store, "Discord", appId, enabled: true, "2026-06-21T12:07:20+01:00");
+        await InsertNotificationAsync(
+            host.Store,
+            new CapturedNotification(
+                AppDisplayName: "Discord",
+                AppId: appId,
+                WindowsNotificationId: 243,
+                CreationTime: DateTimeOffset.Parse("2026-06-21T12:07:21+01:00"),
+                Title: "Standalone Discord title",
+                Body: "Message",
+                RawTextElements: ["Standalone Discord title", "Message"]),
+            DateTimeOffset.Parse("2026-06-21T12:07:22+01:00"));
+
+        var response = await host.Client.GetAsync("/api/notifications");
+        var json = await ReadJsonArrayAsync(response);
+        var discord = json.RootElement.EnumerateArray().Single().GetProperty("discord");
+
+        AssertEqual("unknown", discord.GetProperty("confidence").GetString());
+        AssertEqual(JsonValueKind.Null, discord.GetProperty("sender").ValueKind);
+        AssertEqual(JsonValueKind.Null, discord.GetProperty("channel").ValueKind);
+        AssertEqual(JsonValueKind.Null, discord.GetProperty("server").ValueKind);
+    }
+
+    private static async Task ApiOmitsDiscordContextForOtherApps()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        await AddSourceAsync(host.Store, "App One", "app.one", enabled: true, "2026-06-21T12:07:30+01:00");
+        await InsertNotificationAsync(host.Store, "App One", "app.one", 244, "2026-06-21T12:07:31+01:00");
+
+        var response = await host.Client.GetAsync("/api/notifications");
+        var json = await ReadJsonArrayAsync(response);
+        var item = json.RootElement.EnumerateArray().Single();
+
+        AssertEqual(JsonValueKind.Null, item.GetProperty("discord").ValueKind);
     }
 
     private static async Task SseStoredNotificationReachesSubscriberOnce()

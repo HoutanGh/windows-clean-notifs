@@ -29,6 +29,13 @@ public sealed record NotificationResponse(
     string SourceApp,
     string Timestamp,
     string? PrimaryText,
-    string? MessageText);
+    string? MessageText,
+    DiscordNotificationContextResponse? Discord);
+
+public sealed record DiscordNotificationContextResponse(
+    string? Sender,
+    string? Server,
+    string? Channel,
+    string Confidence);
 
 public sealed record ErrorResponse(string Error);

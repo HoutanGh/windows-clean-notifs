@@ -24,7 +24,11 @@ public static class NotificationApiMapper
             SourceApp: display.SourceApp,
             Timestamp: FormatUtc(display.Timestamp),
             PrimaryText: display.PrimaryText,
-            MessageText: display.MessageText);
+            MessageText: display.MessageText,
+            Discord: DiscordNotificationContextMapper.Map(
+                item.Notification.AppId,
+                display.SourceApp,
+                display.PrimaryText));
     }
 
     public static string FormatUtc(DateTimeOffset value)
