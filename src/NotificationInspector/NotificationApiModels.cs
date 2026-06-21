@@ -34,7 +34,7 @@ public sealed record NotificationResponse(
 
 public sealed record DiscordNotificationContextResponse(
     string? Sender,
-    string? Server,
+    string? Context,
     string? Channel,
     string Confidence);
 

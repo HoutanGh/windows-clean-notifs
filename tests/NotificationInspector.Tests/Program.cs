@@ -907,7 +907,7 @@ internal static class Program
         AssertEqual("parsed", discord.GetProperty("confidence").GetString());
         AssertEqual("Trader Bot", discord.GetProperty("sender").GetString());
         AssertEqual("#stocks-and-options", discord.GetProperty("channel").GetString());
-        AssertEqual("Main Chat", discord.GetProperty("server").GetString());
+        AssertEqual("Main Chat", discord.GetProperty("context").GetString());
     }
 
     private static async Task ApiMarksUnknownDiscordContext()
@@ -934,7 +934,7 @@ internal static class Program
         AssertEqual("unknown", discord.GetProperty("confidence").GetString());
         AssertEqual(JsonValueKind.Null, discord.GetProperty("sender").ValueKind);
         AssertEqual(JsonValueKind.Null, discord.GetProperty("channel").ValueKind);
-        AssertEqual(JsonValueKind.Null, discord.GetProperty("server").ValueKind);
+        AssertEqual(JsonValueKind.Null, discord.GetProperty("context").ValueKind);
     }
 
     private static async Task ApiOmitsDiscordContextForOtherApps()

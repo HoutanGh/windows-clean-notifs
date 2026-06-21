@@ -23,18 +23,18 @@ internal static class DiscordNotificationContextMapper
             normalizedTitle,
             out var sender,
             out var channel,
-            out var server))
+            out var context))
         {
             return new DiscordNotificationContextResponse(
                 Sender: sender,
-                Server: server,
+                Context: context,
                 Channel: channel,
                 Confidence: ParsedConfidence);
         }
 
         return new DiscordNotificationContextResponse(
             Sender: null,
-            Server: null,
+            Context: null,
             Channel: null,
             Confidence: UnknownConfidence);
     }
@@ -50,11 +50,11 @@ internal static class DiscordNotificationContextMapper
         string? title,
         out string sender,
         out string channel,
-        out string server)
+        out string contextLabel)
     {
         sender = string.Empty;
         channel = string.Empty;
-        server = string.Empty;
+        contextLabel = string.Empty;
 
         if (string.IsNullOrWhiteSpace(title) || title[^1] != ')')
         {
@@ -76,9 +76,9 @@ internal static class DiscordNotificationContextMapper
 
         sender = title[..openIndex].Trim();
         channel = context[..commaIndex].Trim();
-        server = context[(commaIndex + 1)..].Trim();
+        contextLabel = context[(commaIndex + 1)..].Trim();
 
-        return sender.Length > 0 && channel.Length > 0 && server.Length > 0;
+        return sender.Length > 0 && channel.Length > 0 && contextLabel.Length > 0;
     }
 
     private static string? NormalizeGroupingText(string? value)
