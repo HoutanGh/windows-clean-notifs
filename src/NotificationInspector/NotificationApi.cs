@@ -156,15 +156,16 @@ public static class NotificationApi
                 }
             }
 
-            using var heartbeatTimer = new PeriodicTimer(HeartbeatInterval);
             while (!context.RequestAborted.IsCancellationRequested)
             {
+                using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
                 var readTask = subscription.Reader.WaitToReadAsync(context.RequestAborted).AsTask();
-                var heartbeatTask = heartbeatTimer.WaitForNextTickAsync(context.RequestAborted).AsTask();
+                var heartbeatTask = Task.Delay(HeartbeatInterval, heartbeatCts.Token);
                 var completed = await Task.WhenAny(readTask, heartbeatTask);
 
                 if (completed == readTask)
                 {
+                    await heartbeatCts.CancelAsync();
                     if (!await readTask)
                     {
                         break;
@@ -180,11 +181,6 @@ public static class NotificationApi
                 }
                 else
                 {
-                    if (!await heartbeatTask)
-                    {
-                        break;
-                    }
-
                     await context.Response.WriteAsync(": heartbeat\n\n", context.RequestAborted);
                     await context.Response.Body.FlushAsync(context.RequestAborted);
                 }
