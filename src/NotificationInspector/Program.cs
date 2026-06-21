@@ -1,7 +1,5 @@
-using System.Collections.Concurrent;
-using System.Threading.Channels;
+using System.Globalization;
 using Windows.ApplicationModel;
-using Windows.UI.Notifications;
 using Windows.UI.Notifications.Management;
 
 namespace WindowsCleanNotifs.NotificationInspector;
@@ -13,22 +11,30 @@ internal static class Program
 
     public static async Task<int> Main(string[] args)
     {
-        var options = Options.Parse(args);
+        var parseResult = Options.Parse(args);
+        if (parseResult.Error is not null)
+        {
+            Console.Error.WriteLine(parseResult.Error);
+            PrintUsage();
+            return UsageError;
+        }
+
+        var options = parseResult.Options;
         if (options.ShowHelp)
         {
             PrintUsage();
-            return options.Invalid ? UsageError : 0;
+            return 0;
         }
 
         if (!OperatingSystem.IsWindows())
         {
-            Console.Error.WriteLine("This spike only runs on Windows.");
+            Console.Error.WriteLine("This collector only runs on Windows.");
             return 1;
         }
 
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041))
         {
-            Console.Error.WriteLine("This spike expects Windows 10 2004 / Windows 11 or newer.");
+            Console.Error.WriteLine("This collector expects Windows 10 2004 / Windows 11 or newer.");
             return 1;
         }
 
@@ -58,14 +64,14 @@ internal static class Program
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"Access request failed: {ex.GetType().Name}: {ex.Message}");
-                Console.Error.WriteLine("TODO: If this fails from the console host on your machine, verify whether the request must be initiated from a packaged UI thread.");
+                Console.Error.WriteLine("Try opening Windows Settings with: start ms-settings:privacy-notifications");
                 return 1;
             }
 
             Console.WriteLine($"Access status after request: {accessStatus}");
         }
 
-        if (!options.Listen)
+        if (options.CheckAccess || !options.Listen)
         {
             PrintAccessAdvice(accessStatus);
             return accessStatus == UserNotificationListenerAccessStatus.Allowed ? 0 : 2;
@@ -73,7 +79,7 @@ internal static class Program
 
         if (!options.PrintContent)
         {
-            Console.Error.WriteLine("Refusing to listen without --print-content. This inspector prints notification title/body/raw text to the terminal.");
+            Console.Error.WriteLine("Refusing to listen without --print-content. This collector prints notification title/body/raw text to the terminal.");
             return UsageError;
         }
 
@@ -84,133 +90,181 @@ internal static class Program
         }
 
         Console.WriteLine("Content printing is ON for this process because --print-content was supplied.");
-        Console.WriteLine("Listening for toast notifications. Press Ctrl+C to stop.");
+        Console.WriteLine($"Polling visible toast notifications every {FormatInterval(options.PollInterval)}.");
+        Console.WriteLine("Press Ctrl+C to stop.");
         Console.WriteLine();
 
-        var seen = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
         using var cts = new CancellationTokenSource();
-        var stopped = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var changes = Channel.CreateUnbounded<UserNotificationChangedEventArgs>(
-            new UnboundedChannelOptions
-            {
-                SingleReader = true,
-                SingleWriter = false
-            });
-
         Console.CancelKeyPress += (_, eventArgs) =>
         {
             eventArgs.Cancel = true;
-            CancelQuietly(cts);
-            stopped.TrySetResult(true);
+            RequestStop(cts);
         };
 
-        void OnNotificationChanged(UserNotificationListener sender, UserNotificationChangedEventArgs eventArgs)
-        {
-            if (!changes.Writer.TryWrite(eventArgs))
-            {
-                Console.Error.WriteLine($"Dropped notification change event: {eventArgs.ChangeKind} id={eventArgs.UserNotificationId}");
-            }
-        }
-
-        var eventSubscriptionActive = false;
-        Task? pump = null;
-        try
-        {
-            listener.NotificationChanged += OnNotificationChanged;
-            eventSubscriptionActive = true;
-            pump = ProcessNotificationChangesAsync(listener, changes.Reader, seen, cts.Token);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"NotificationChanged event subscription failed: {ex.GetType().Name}: {ex.Message}");
-            Console.WriteLine("Falling back to polling visible toast notifications once per second.");
-        }
+        var provider = new WindowsNotificationSnapshotProvider(listener);
+        var collector = new PollingNotificationCollector(
+            provider,
+            dedupeRetention: TimeSpan.FromMinutes(10));
 
         try
         {
-            await PrintCurrentNotificationsAsync(listener, seen);
-            if (eventSubscriptionActive)
-            {
-                await stopped.Task;
-            }
-            else
-            {
-                try
-                {
-                    await PollNotificationsAsync(listener, seen, cts.Token);
-                }
-                catch (OperationCanceledException) when (cts.IsCancellationRequested)
-                {
-                }
-            }
+            await RunCollectorAsync(collector, options.PollInterval, cts.Token);
         }
-        finally
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
-            if (eventSubscriptionActive)
-            {
-                listener.NotificationChanged -= OnNotificationChanged;
-            }
-
-            changes.Writer.TryComplete();
-            CancelQuietly(cts);
-
-            if (pump is not null)
-            {
-                try
-                {
-                    await pump;
-                }
-                catch (OperationCanceledException)
-                {
-                }
-            }
         }
 
         Console.WriteLine("Stopped.");
         return 0;
     }
 
-    private static async Task PrintCurrentNotificationsAsync(
-        UserNotificationListener listener,
-        ConcurrentDictionary<string, byte> seen,
-        bool printCount = true,
-        string eventSource = "existing")
+    private static async Task RunCollectorAsync(
+        PollingNotificationCollector collector,
+        TimeSpan pollInterval,
+        CancellationToken cancellationToken)
     {
-        IReadOnlyList<UserNotification> notifications;
+        await SeedUntilSuccessfulAsync(collector, pollInterval, cancellationToken);
+
+        using var timer = new PeriodicTimer(pollInterval);
+        while (await timer.WaitForNextTickAsync(cancellationToken))
+        {
+            try
+            {
+                var result = await collector.PollOnceAsync(cancellationToken);
+                PrintCollectorResult(result, "poll");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Polling failed at {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz}: {ex.GetType().Name}: {ex.Message}");
+                Console.Error.WriteLine("Will retry on the next poll. Access denial is not treated as an empty notification feed.");
+            }
+        }
+    }
+
+    private static async Task SeedUntilSuccessfulAsync(
+        PollingNotificationCollector collector,
+        TimeSpan retryInterval,
+        CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            try
+            {
+                var startup = await collector.SeedAsync(cancellationToken);
+                Console.WriteLine($"Startup snapshot visible to listener: {startup.SnapshotCount}");
+                PrintCollectorResult(startup, "startup snapshot");
+                Console.WriteLine();
+                return;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Startup snapshot failed at {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz}: {ex.GetType().Name}: {ex.Message}");
+                Console.Error.WriteLine("Will retry before emitting any notifications so existing toasts are not reported as new.");
+                await Task.Delay(retryInterval, cancellationToken);
+            }
+        }
+    }
+
+    private static void PrintCollectorResult(CollectorSnapshotResult result, string eventSource)
+    {
+        foreach (var source in result.DiscoveredSources)
+        {
+            PrintSourceDiscovered(source, eventSource);
+        }
+
+        foreach (var notification in result.NewNotifications)
+        {
+            PrintNotification(notification, eventSource);
+        }
+    }
+
+    private static void PrintSourceDiscovered(NotificationSource source, string eventSource)
+    {
+        lock (ConsoleGate)
+        {
+            Console.WriteLine("----");
+            Console.WriteLine("Source discovered");
+            Console.WriteLine($"Event: {eventSource}");
+            Console.WriteLine($"App name: {source.AppDisplayName}");
+            Console.WriteLine($"App id: {source.AppId}");
+            Console.WriteLine();
+        }
+    }
+
+    private static void PrintNotification(CapturedNotification notification, string eventSource)
+    {
+        lock (ConsoleGate)
+        {
+            Console.WriteLine("----");
+            Console.WriteLine("New notification");
+            Console.WriteLine($"Event: {eventSource}");
+            Console.WriteLine($"App name: {notification.AppDisplayName}");
+            Console.WriteLine($"App id: {notification.AppId}");
+            Console.WriteLine($"Windows notification id: {notification.WindowsNotificationId}");
+            Console.WriteLine($"Timestamp: {notification.CreationTime.ToLocalTime():yyyy-MM-dd HH:mm:ss.fff zzz}");
+            Console.WriteLine("Title:");
+            Console.WriteLine(Indent(notification.Title));
+            Console.WriteLine("Body/message:");
+            Console.WriteLine(Indent(notification.Body));
+            Console.WriteLine("Raw text elements:");
+
+            if (notification.RawTextElements.Count == 0)
+            {
+                Console.WriteLine("  <none>");
+            }
+            else
+            {
+                for (var index = 0; index < notification.RawTextElements.Count; index++)
+                {
+                    Console.WriteLine($"  [{index}] {OneLine(notification.RawTextElements[index])}");
+                }
+            }
+
+            Console.WriteLine();
+        }
+    }
+
+    private static void PrintPackageIdentity()
+    {
         try
         {
-            notifications = await listener.GetNotificationsAsync(NotificationKinds.Toast);
+            Console.WriteLine($"Package identity: {Package.Current.Id.FullName}");
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Could not read current notifications: {ex.GetType().Name}: {ex.Message}");
-            return;
-        }
-
-        if (printCount)
-        {
-            Console.WriteLine($"Current toast notifications visible to listener: {notifications.Count}");
-        }
-
-        foreach (var notification in notifications.OrderBy(notification => notification.CreationTime).ThenBy(notification => notification.Id))
-        {
-            TryPrintNotification(notification, eventSource, seen);
+            Console.WriteLine($"Package identity: not detected ({ex.GetType().Name}). Running unpackaged console collector.");
         }
     }
 
-    private static async Task PollNotificationsAsync(
-        UserNotificationListener listener,
-        ConcurrentDictionary<string, byte> seen,
-        CancellationToken cancellationToken)
+    private static void PrintAccessAdvice(UserNotificationListenerAccessStatus status)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
-        while (!cancellationToken.IsCancellationRequested && await timer.WaitForNextTickAsync(cancellationToken))
+        switch (status)
         {
-            await PrintCurrentNotificationsAsync(listener, seen, printCount: false, eventSource: "polled");
+            case UserNotificationListenerAccessStatus.Allowed:
+                Console.WriteLine("Notification listener access is allowed.");
+                break;
+            case UserNotificationListenerAccessStatus.Denied:
+                Console.WriteLine("Notification listener access is denied; this is not an empty notification feed.");
+                Console.WriteLine("Run again with --request-access, or open Windows Settings with: start ms-settings:privacy-notifications");
+                break;
+            case UserNotificationListenerAccessStatus.Unspecified:
+                Console.WriteLine("Notification listener access is unspecified. Re-run with --request-access to show the Windows permission prompt.");
+                break;
+            default:
+                Console.WriteLine($"Notification listener access is {status}.");
+                break;
         }
     }
 
-    private static void CancelQuietly(CancellationTokenSource cts)
+    private static void RequestStop(CancellationTokenSource cts)
     {
         try
         {
@@ -225,166 +279,6 @@ internal static class Program
         catch (ObjectDisposedException)
         {
         }
-    }
-
-    private static async Task ProcessNotificationChangesAsync(
-        UserNotificationListener listener,
-        ChannelReader<UserNotificationChangedEventArgs> changes,
-        ConcurrentDictionary<string, byte> seen,
-        CancellationToken cancellationToken)
-    {
-        await foreach (var change in changes.ReadAllAsync(cancellationToken))
-        {
-            if (change.ChangeKind != UserNotificationChangedKind.Added)
-            {
-                PrintNonAddedChange(change);
-                continue;
-            }
-
-            UserNotification notification;
-            try
-            {
-                notification = listener.GetNotification(change.UserNotificationId);
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Could not read notification {change.UserNotificationId}: {ex.GetType().Name}: {ex.Message}");
-                continue;
-            }
-
-            if (notification is null)
-            {
-                Console.Error.WriteLine($"Notification {change.UserNotificationId} was added but is no longer available.");
-                continue;
-            }
-
-            TryPrintNotification(notification, "added", seen);
-        }
-    }
-
-    private static void TryPrintNotification(
-        UserNotification notification,
-        string eventSource,
-        ConcurrentDictionary<string, byte> seen)
-    {
-        try
-        {
-            var appId = EmptyAsUnknown(notification.AppInfo.AppUserModelId);
-            var dedupeKey = $"{appId}:{notification.Id}";
-            if (!seen.TryAdd(dedupeKey, 0))
-            {
-                return;
-            }
-
-            var appName = EmptyAsUnknown(notification.AppInfo.DisplayInfo.DisplayName);
-            var timestamp = notification.CreationTime.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff zzz");
-            var capturedAt = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss.fff zzz");
-            var rawText = ExtractRawText(notification);
-            var title = rawText.FirstOrDefault() ?? string.Empty;
-            var body = rawText.Count > 1 ? string.Join(Environment.NewLine, rawText.Skip(1)) : string.Empty;
-
-            lock (ConsoleGate)
-            {
-                Console.WriteLine("----");
-                Console.WriteLine($"Event: {eventSource}");
-                Console.WriteLine($"App name: {appName}");
-                Console.WriteLine($"App id: {appId}");
-                Console.WriteLine($"Windows notification id: {notification.Id}");
-                Console.WriteLine($"Timestamp: {timestamp}");
-                Console.WriteLine($"Captured at: {capturedAt}");
-                Console.WriteLine("Title:");
-                Console.WriteLine(Indent(title));
-                Console.WriteLine("Body/message:");
-                Console.WriteLine(Indent(body));
-                Console.WriteLine("Raw text elements:");
-
-                if (rawText.Count == 0)
-                {
-                    Console.WriteLine("  <none>");
-                }
-                else
-                {
-                    for (var index = 0; index < rawText.Count; index++)
-                    {
-                        Console.WriteLine($"  [{index}] {OneLine(rawText[index])}");
-                    }
-                }
-
-                Console.WriteLine();
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"Could not print notification: {ex.GetType().Name}: {ex.Message}");
-        }
-    }
-
-    private static IReadOnlyList<string> ExtractRawText(UserNotification notification)
-    {
-        var visual = notification.Notification.Visual;
-        var toastBinding = visual.GetBinding(KnownNotificationBindings.ToastGeneric);
-        if (toastBinding is not null)
-        {
-            return toastBinding.GetTextElements().Select(element => element.Text ?? string.Empty).ToArray();
-        }
-
-        var allText = new List<string>();
-        foreach (var binding in visual.Bindings)
-        {
-            allText.AddRange(binding.GetTextElements().Select(element => element.Text ?? string.Empty));
-        }
-
-        return allText;
-    }
-
-    private static void PrintNonAddedChange(UserNotificationChangedEventArgs change)
-    {
-        lock (ConsoleGate)
-        {
-            Console.WriteLine("----");
-            Console.WriteLine($"Event: {change.ChangeKind}");
-            Console.WriteLine($"Windows notification id: {change.UserNotificationId}");
-            Console.WriteLine($"Observed at: {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz}");
-            Console.WriteLine();
-        }
-    }
-
-    private static void PrintPackageIdentity()
-    {
-        try
-        {
-            Console.WriteLine($"Package identity: {Package.Current.Id.FullName}");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Package identity: not detected ({ex.GetType().Name}). Running unpackaged console spike.");
-        }
-    }
-
-    private static void PrintAccessAdvice(UserNotificationListenerAccessStatus status)
-    {
-        switch (status)
-        {
-            case UserNotificationListenerAccessStatus.Allowed:
-                Console.WriteLine("Notification listener access is allowed.");
-                break;
-            case UserNotificationListenerAccessStatus.Denied:
-                Console.WriteLine("Notification listener access is denied.");
-                Console.WriteLine("Open Windows Settings > Privacy & security > App permissions > Notifications and allow this packaged app.");
-                Console.WriteLine("Shortcut URI: ms-settings:privacy-notifications");
-                break;
-            case UserNotificationListenerAccessStatus.Unspecified:
-                Console.WriteLine("Notification listener access is unspecified. Re-run with --request-access to show the Windows permission prompt.");
-                break;
-            default:
-                Console.WriteLine($"Notification listener access is {status}.");
-                break;
-        }
-    }
-
-    private static string EmptyAsUnknown(string? value)
-    {
-        return string.IsNullOrWhiteSpace(value) ? "<unknown>" : value;
     }
 
     private static string Indent(string value)
@@ -404,21 +298,32 @@ internal static class Program
             : value.Replace("\r\n", "\\n", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal);
     }
 
+    private static string FormatInterval(TimeSpan interval)
+    {
+        if (interval.TotalMilliseconds < 1000)
+        {
+            return $"{interval.TotalMilliseconds.ToString("0.###", CultureInfo.InvariantCulture)} ms";
+        }
+
+        return $"{interval.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)} seconds";
+    }
+
     private static void PrintUsage()
     {
-        Console.WriteLine("Windows notification inspector spike");
+        Console.WriteLine("Windows notification collector spike");
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  NotificationInspector.exe --check-access");
         Console.WriteLine("  NotificationInspector.exe --request-access");
-        Console.WriteLine("  NotificationInspector.exe --listen --request-access --print-content");
+        Console.WriteLine("  NotificationInspector.exe --listen --request-access --print-content [--poll-interval <seconds>]");
         Console.WriteLine();
         Console.WriteLine("Options:");
-        Console.WriteLine("  --check-access     Print current UserNotificationListener access and exit.");
-        Console.WriteLine("  --request-access   Ask Windows for notification listener access, then print status.");
-        Console.WriteLine("  --listen           Subscribe to notification changes and print current/new toasts.");
-        Console.WriteLine("  --print-content    Required with --listen; acknowledges notification contents will be printed.");
-        Console.WriteLine("  --help             Show this help.");
+        Console.WriteLine("  --check-access             Print current UserNotificationListener access and exit.");
+        Console.WriteLine("  --request-access           Ask Windows for notification listener access, then print status.");
+        Console.WriteLine("  --listen                   Poll visible toast notifications and print newly detected toasts.");
+        Console.WriteLine("  --print-content            Required with --listen; acknowledges notification contents will be printed.");
+        Console.WriteLine("  --poll-interval <seconds>  Polling interval. Defaults to 1.");
+        Console.WriteLine("  --help                     Show this help.");
     }
 
     private sealed record Options(
@@ -426,23 +331,33 @@ internal static class Program
         bool RequestAccess,
         bool Listen,
         bool PrintContent,
-        bool ShowHelp,
-        bool Invalid)
+        TimeSpan PollInterval,
+        bool ShowHelp)
     {
-        public static Options Parse(IReadOnlyList<string> args)
+        public static OptionsParseResult Parse(IReadOnlyList<string> args)
         {
+            var defaultOptions = new Options(
+                CheckAccess: false,
+                RequestAccess: false,
+                Listen: false,
+                PrintContent: false,
+                PollInterval: TimeSpan.FromSeconds(1),
+                ShowHelp: args.Count == 0);
+
             if (args.Count == 0)
             {
-                return new Options(false, false, false, false, true, false);
+                return new OptionsParseResult(defaultOptions, null);
             }
 
             var checkAccess = false;
             var requestAccess = false;
             var listen = false;
             var printContent = false;
+            var pollInterval = TimeSpan.FromSeconds(1);
 
-            foreach (var arg in args)
+            for (var index = 0; index < args.Count; index++)
             {
+                var arg = args[index];
                 switch (arg)
                 {
                     case "--check-access":
@@ -457,17 +372,34 @@ internal static class Program
                     case "--print-content":
                         printContent = true;
                         break;
+                    case "--poll-interval":
+                        if (index + 1 >= args.Count)
+                        {
+                            return new OptionsParseResult(defaultOptions, "--poll-interval requires a number of seconds.");
+                        }
+
+                        index++;
+                        if (!double.TryParse(args[index], NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds) || seconds <= 0)
+                        {
+                            return new OptionsParseResult(defaultOptions, "--poll-interval must be a positive number of seconds.");
+                        }
+
+                        pollInterval = TimeSpan.FromSeconds(seconds);
+                        break;
                     case "--help":
                     case "-h":
                     case "/?":
-                        return new Options(false, false, false, false, true, false);
+                        return new OptionsParseResult(defaultOptions with { ShowHelp = true }, null);
                     default:
-                        Console.Error.WriteLine($"Unknown option: {arg}");
-                        return new Options(false, false, false, false, true, true);
+                        return new OptionsParseResult(defaultOptions, $"Unknown option: {arg}");
                 }
             }
 
-            return new Options(checkAccess, requestAccess, listen, printContent, false, false);
+            return new OptionsParseResult(
+                new Options(checkAccess, requestAccess, listen, printContent, pollInterval, ShowHelp: false),
+                null);
         }
     }
+
+    private sealed record OptionsParseResult(Options Options, string? Error);
 }
