@@ -134,6 +134,12 @@ Default one-second polling with enabled-source terminal content printing:
 & "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --listen --print-content
 ```
 
+Include raw fields and Unicode diagnostics for enabled-source notifications:
+
+```powershell
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --listen --print-content --debug-raw
+```
+
 Custom interval, in seconds:
 
 ```powershell
@@ -161,21 +167,19 @@ When a previously unknown application is inserted into the database, the collect
 ```text
 ----
 Source discovered
-Event: poll
 App name: Example App
 App id: example.app.id
-Enabled: false
 ```
 
-For enabled sources only, newly detected notifications are stored. If `--print-content` is supplied, those enabled-source notifications are also printed with:
+For enabled sources only, newly detected notifications are stored. If `--print-content` is supplied, those enabled-source notifications are also printed in concise display form:
 
-- app display name;
-- app ID / AUMID;
-- Windows notification ID;
-- creation timestamp;
-- title;
-- body/message;
-- raw text elements in order.
+```text
+14:32:08 · Discord
+Scanner Bot
+NVDA breaking premarket high
+```
+
+Normal `--print-content` output intentionally excludes app ID, Windows notification ID, raw text indexes, event labels, and captured/created timestamp diagnostics. Use `--debug-raw` with `--print-content` to print the raw title, raw body, raw text elements, derived display fields, and Unicode code-point diagnostics.
 
 Disabled-source notification content is neither stored nor printed.
 
@@ -208,7 +212,11 @@ The tests cover:
 - duplicate notification insert protection;
 - raw text element round-trip order;
 - startup snapshot notifications not being stored;
-- retention deleting old notifications while preserving sources.
+- retention deleting old notifications while preserving sources;
+- derived display mapping and fallback rules;
+- preservation of URLs, tickers, prices, percentages, emoji, symbols, and multiline text in display mapping;
+- normal terminal output excluding debug metadata;
+- debug raw output including raw values and Unicode code-point diagnostics.
 
 ## Manual Verification
 
@@ -220,10 +228,11 @@ The tests cover:
 6. Run `--list-sources` and confirm both apps appear as `Enabled: false`.
 7. Enable Discord using the exact Discord app ID from `--list-sources`.
 8. Run `--listen --print-content`.
-9. Trigger a new Discord notification and confirm it prints as `New notification`.
+9. Trigger a new Discord notification and confirm it prints once in concise display form.
 10. Trigger a notification from the still-disabled other app and confirm its content does not print.
 11. Leave the same Discord toast visible for several polls and confirm it does not print repeatedly.
 12. Trigger rapid Discord notifications and confirm each visible notification appears once.
-13. Stop with `Ctrl+C` and confirm shutdown is clean.
+13. Run with `--listen --print-content --debug-raw`, trigger one enabled-source notification, and confirm raw fields plus Unicode code points print only in debug mode.
+14. Stop with `Ctrl+C` and confirm shutdown is clean.
 
 Because disabled-source content is intentionally not stored, use the automated tests to verify the SQLite privacy rule directly.
