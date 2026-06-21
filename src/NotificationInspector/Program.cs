@@ -184,9 +184,11 @@ internal static class Program
         var serverState = new NotificationServerState();
         serverState.SetListenerAccessStatus(accessStatus.ToString());
 
+        var frontendAssetsPath = NotificationApi.GetDefaultFrontendAssetsPath();
         var apiOptions = new NotificationApiOptions(
             PollInterval: options.PollInterval,
-            RetentionWindow: RetentionWindow);
+            RetentionWindow: RetentionWindow,
+            FrontendAssetsPath: frontendAssetsPath);
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             Args = [],
@@ -220,7 +222,13 @@ internal static class Program
 
         Console.WriteLine("Newly discovered sources are disabled by default.");
         Console.WriteLine($"Polling visible toast notifications every {FormatInterval(options.PollInterval)}.");
-        Console.WriteLine($"Local API: http://127.0.0.1:{options.Port.ToString(CultureInfo.InvariantCulture)}");
+        Console.WriteLine($"Local dashboard: http://127.0.0.1:{options.Port.ToString(CultureInfo.InvariantCulture)}");
+        Console.WriteLine($"Local API: http://127.0.0.1:{options.Port.ToString(CultureInfo.InvariantCulture)}/api/health");
+        if (!NotificationApi.FrontendAssetsAreBuilt(frontendAssetsPath))
+        {
+            Console.WriteLine("Frontend assets have not been built; the dashboard URL will show build instructions.");
+        }
+
         Console.WriteLine("Press Ctrl+C to stop.");
         Console.WriteLine();
 

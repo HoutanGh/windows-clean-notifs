@@ -1,3 +1,5 @@
 artifacts/
 bin/
 obj/
+src/NotificationDashboard.Web/dist/
+src/NotificationDashboard.Web/node_modules/

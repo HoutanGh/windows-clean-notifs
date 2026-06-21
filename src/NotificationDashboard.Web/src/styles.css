@@ -1,0 +1,341 @@
+:root {
+  color-scheme: light dark;
+  font-family:
+    Segoe UI,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  background: #f6f7f8;
+  color: #1d2329;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  background: #f6f7f8;
+  color: #1d2329;
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 64px;
+  padding: 12px 20px;
+  border-bottom: 1px solid #d9dee3;
+  background: rgba(246, 247, 248, 0.96);
+  backdrop-filter: blur(10px);
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 18px;
+  font-weight: 650;
+}
+
+h2 {
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 3px;
+  color: #52606c;
+  font-size: 13px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #7a8590;
+}
+
+.status-connected {
+  background: #2f8f5b;
+}
+
+.status-reconnecting,
+.status-connecting {
+  background: #b7791f;
+}
+
+.status-unavailable {
+  background: #b42318;
+}
+
+.button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #b8c0c8;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #1d2329;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  border-color: #65717c;
+  background: #eef1f4;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.button.subtle {
+  background: transparent;
+}
+
+.feed-shell {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 14px 20px 36px;
+}
+
+.notification-feed,
+.source-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.notification-row {
+  display: grid;
+  grid-template-columns: 178px minmax(0, 1fr);
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid #e0e4e8;
+}
+
+.notification-row time {
+  color: #65717c;
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.notification-content {
+  min-width: 0;
+}
+
+.source-name {
+  color: #52606c;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.primary-text {
+  margin-top: 2px;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.message-text {
+  margin-top: 3px;
+  line-height: 1.38;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.state-message {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 0;
+  color: #52606c;
+  border-bottom: 1px solid #e0e4e8;
+}
+
+.state-message strong {
+  color: #1d2329;
+}
+
+.load-older-row {
+  display: flex;
+  justify-content: center;
+  padding: 16px 0 0;
+}
+
+.sources-panel {
+  position: fixed;
+  inset: 76px 20px auto auto;
+  z-index: 4;
+  width: min(460px, calc(100vw - 40px));
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid #ccd3da;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgba(27, 39, 51, 0.18);
+}
+
+.sources-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.sources-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.source-row {
+  border-top: 1px solid #e3e7eb;
+}
+
+.source-row label {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px 0;
+}
+
+.source-row input {
+  width: 16px;
+  height: 16px;
+  margin: 3px 0 0;
+}
+
+.source-row strong,
+.source-row small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.source-row strong {
+  font-size: 14px;
+}
+
+.source-row small {
+  margin-top: 2px;
+  color: #65717c;
+  font-size: 12px;
+}
+
+.muted-text,
+.error-text {
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.muted-text {
+  color: #65717c;
+}
+
+.error-text {
+  color: #b42318;
+}
+
+@media (max-width: 700px) {
+  .app-header {
+    padding: 10px 14px;
+  }
+
+  .feed-shell {
+    padding: 8px 14px 28px;
+  }
+
+  .notification-row {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
+  .notification-row time {
+    white-space: normal;
+  }
+
+  .sources-panel {
+    inset: 68px 12px auto 12px;
+    width: auto;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root,
+  .app-shell {
+    background: #111416;
+    color: #eef1f4;
+  }
+
+  .app-header {
+    border-bottom-color: #2b333a;
+    background: rgba(17, 20, 22, 0.96);
+  }
+
+  .status-line,
+  .source-name,
+  .notification-row time,
+  .source-row small,
+  .muted-text {
+    color: #a5b0ba;
+  }
+
+  .button {
+    border-color: #46515b;
+    background: #1d2329;
+    color: #eef1f4;
+  }
+
+  .button:hover:not(:disabled) {
+    border-color: #7a8590;
+    background: #293139;
+  }
+
+  .notification-row,
+  .state-message,
+  .source-row {
+    border-color: #2b333a;
+  }
+
+  .state-message strong {
+    color: #eef1f4;
+  }
+
+  .sources-panel {
+    border-color: #3a444d;
+    background: #171b1f;
+    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.4);
+  }
+
+  .error-text {
+    color: #ffb4ab;
+  }
+}

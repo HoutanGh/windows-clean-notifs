@@ -2,7 +2,8 @@ namespace WindowsCleanNotifs.NotificationInspector;
 
 public sealed record NotificationApiOptions(
     TimeSpan PollInterval,
-    TimeSpan RetentionWindow);
+    TimeSpan RetentionWindow,
+    string? FrontendAssetsPath = null);
 
 public sealed record HealthResponse(
     string Status,

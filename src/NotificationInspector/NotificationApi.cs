@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 
 namespace WindowsCleanNotifs.NotificationInspector;
 
@@ -12,9 +13,20 @@ public static class NotificationApi
     public const int DefaultPort = 4827;
     public const int DefaultNotificationLimit = 100;
     public const int MaximumNotificationLimit = 500;
+    public const string FrontendAssetsDirectoryName = "wwwroot";
 
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(15);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    public static string GetDefaultFrontendAssetsPath()
+    {
+        return Path.Combine(AppContext.BaseDirectory, FrontendAssetsDirectoryName);
+    }
+
+    public static bool FrontendAssetsAreBuilt(string assetsPath)
+    {
+        return File.Exists(Path.Combine(assetsPath, "index.html"));
+    }
 
     public static void ConfigureServices(
         IServiceCollection services,
@@ -117,6 +129,8 @@ public static class NotificationApi
         });
 
         app.MapGet("/api/events", StreamEventsAsync);
+
+        MapFrontend(app);
     }
 
     private static async Task StreamEventsAsync(
@@ -127,6 +141,14 @@ public static class NotificationApi
         if (!TryReadOptionalNonNegativeLong(context, "afterId", out var afterId, out var cursorError))
         {
             await ExecuteResultAsync(context, cursorError);
+            return;
+        }
+
+        var replayAfterId = afterId;
+        if (replayAfterId is null
+            && !TryReadOptionalNonNegativeHeaderLong(context, "Last-Event-ID", out replayAfterId, out var headerError))
+        {
+            await ExecuteResultAsync(context, headerError);
             return;
         }
 
@@ -144,9 +166,9 @@ public static class NotificationApi
 
         try
         {
-            if (afterId is not null)
+            if (replayAfterId is not null)
             {
-                var replay = await store.ListEnabledNotificationsAfterIdAsync(afterId.Value, context.RequestAborted);
+                var replay = await store.ListEnabledNotificationsAfterIdAsync(replayAfterId.Value, context.RequestAborted);
                 foreach (var item in replay.Select(NotificationApiMapper.ToNotificationResponse))
                 {
                     if (sentIds.Add(item.Id))
@@ -191,6 +213,69 @@ public static class NotificationApi
         }
     }
 
+    private static void MapFrontend(WebApplication app)
+    {
+        var options = app.Services.GetRequiredService<NotificationApiOptions>();
+        var assetsPath = options.FrontendAssetsPath ?? GetDefaultFrontendAssetsPath();
+
+        if (FrontendAssetsAreBuilt(assetsPath))
+        {
+            var fileProvider = new PhysicalFileProvider(assetsPath);
+            app.UseStaticFiles(new StaticFileOptions
+            {
+                FileProvider = fileProvider
+            });
+
+            app.MapGet("/", context => WriteIndexHtmlAsync(context, assetsPath));
+            app.MapFallback(context =>
+            {
+                if (context.Request.Path.StartsWithSegments("/api"))
+                {
+                    return WriteErrorAsync(
+                        context,
+                        StatusCodes.Status404NotFound,
+                        "API endpoint not found.");
+                }
+
+                return WriteIndexHtmlAsync(context, assetsPath);
+            });
+            return;
+        }
+
+        app.MapGet("/", context => WriteMissingFrontendAssetsAsync(context, assetsPath));
+        app.MapFallback(context =>
+        {
+            if (context.Request.Path.StartsWithSegments("/api"))
+            {
+                return WriteErrorAsync(
+                    context,
+                    StatusCodes.Status404NotFound,
+                    "API endpoint not found.");
+            }
+
+            return WriteMissingFrontendAssetsAsync(context, assetsPath);
+        });
+    }
+
+    private static async Task WriteIndexHtmlAsync(HttpContext context, string assetsPath)
+    {
+        context.Response.ContentType = "text/html; charset=utf-8";
+        await context.Response.SendFileAsync(
+            Path.Combine(assetsPath, "index.html"),
+            context.RequestAborted);
+    }
+
+    private static async Task WriteMissingFrontendAssetsAsync(HttpContext context, string assetsPath)
+    {
+        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        context.Response.ContentType = "text/plain; charset=utf-8";
+        await context.Response.WriteAsync(
+            "Frontend assets have not been built.\n"
+            + "Run npm install and npm run build in src/NotificationDashboard.Web, then publish or run --serve again.\n"
+            + $"Expected index.html at: {assetsPath}",
+            context.RequestAborted);
+    }
+
     private static bool TryReadLimit(
         HttpContext context,
         out int limit,
@@ -232,6 +317,40 @@ public static class NotificationApi
 
         if (values.Count != 1
             || !long.TryParse(values[0], NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)
+            || parsed < 0)
+        {
+            error = Results.BadRequest(new ErrorResponse($"{name} must be a non-negative integer."));
+            return false;
+        }
+
+        value = parsed;
+        return true;
+    }
+
+    private static bool TryReadOptionalNonNegativeHeaderLong(
+        HttpContext context,
+        string name,
+        out long? value,
+        out IResult error)
+    {
+        value = null;
+        error = Results.Empty;
+
+        if (!context.Request.Headers.TryGetValue(name, out var values) || values.Count == 0)
+        {
+            return true;
+        }
+
+        var headerValues = values
+            .Where(headerValue => !string.IsNullOrWhiteSpace(headerValue))
+            .ToArray();
+        if (headerValues.Length == 0)
+        {
+            return true;
+        }
+
+        if (headerValues.Length != 1
+            || !long.TryParse(headerValues[0], NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)
             || parsed < 0)
         {
             error = Results.BadRequest(new ErrorResponse($"{name} must be a non-negative integer."));
