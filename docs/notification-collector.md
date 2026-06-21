@@ -1,6 +1,11 @@
 # Windows Notification Collector
 
-This is a terminal-only Windows notification collector. It does not include the React UI, HTTP API, SSE, Discord-specific parsing, MSIX packaging, or AI filtering.
+This is a Windows notification collector with two modes:
+
+- terminal collector mode with `--listen`;
+- loopback HTTP API and Server-Sent Events mode with `--serve`.
+
+It does not include the React UI, browser assets, `start.bat`, Discord-specific parsing, MSIX packaging, or AI filtering.
 
 The collector can persist enabled-source notifications to SQLite. Terminal content printing remains opt-in with `--print-content` because titles, bodies, and raw text elements may contain private information.
 
@@ -47,7 +52,7 @@ Retention cleanup deletes stored notifications older than 72 hours. It runs at s
 
 - Windows 11.
 - Windows PowerShell.
-- .NET SDK available to Windows PowerShell.
+- .NET 10 SDK available to Windows PowerShell.
 
 The repository can stay in WSL, but the executable must be built and launched by Windows PowerShell. Do not run the collector as a Linux/WSL process.
 
@@ -185,6 +190,199 @@ Disabled-source notification content is neither stored nor printed.
 
 Stop with `Ctrl+C`. Shutdown should print `Stopped.` without an unhandled exception.
 
+## Serve The Local API
+
+Server mode starts the same polling collector and a local ASP.NET Core minimal API in one process.
+
+Default server mode:
+
+```powershell
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --serve
+```
+
+Expected startup shape:
+
+```text
+Package identity: not detected (...). Running unpackaged console collector.
+Database: C:\Users\<you>\AppData\Local\WindowsCleanNotifs\notifications.db
+Access status: Allowed
+Content printing is OFF. Enabled-source notifications will be stored but not printed.
+Newly discovered sources are disabled by default.
+Polling visible toast notifications every 1 seconds.
+Local API: http://127.0.0.1:4827
+Press Ctrl+C to stop.
+```
+
+Override the port:
+
+```powershell
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --serve --port 4828
+```
+
+Override the polling interval:
+
+```powershell
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --serve --poll-interval 0.5
+```
+
+Server mode binds only to loopback:
+
+```text
+http://127.0.0.1:<port>
+```
+
+It does not bind to `0.0.0.0`, does not expose notification data to the LAN, does not enable unrestricted CORS, and does not serve arbitrary files.
+
+If the port is already in use, startup prints a clear port-conflict message and exits.
+
+## API Endpoints
+
+All JSON uses camelCase.
+
+### GET /api/health
+
+PowerShell:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:4827/api/health
+```
+
+Example response:
+
+```json
+{
+  "status": "ok",
+  "listenerAccessStatus": "Allowed",
+  "collectorRunning": true,
+  "pollingInterval": "00:00:01",
+  "retentionPeriod": "3.00:00:00"
+}
+```
+
+### GET /api/sources
+
+PowerShell:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:4827/api/sources
+```
+
+Example response:
+
+```json
+[
+  {
+    "appId": "com.squirrel.Discord.Discord",
+    "displayName": "Discord",
+    "enabled": true,
+    "firstSeenAt": "2026-06-21T13:00:00.0000000Z",
+    "lastSeenAt": "2026-06-21T13:30:00.0000000Z"
+  }
+]
+```
+
+Sources are sorted with enabled sources first, then alphabetically by display name.
+
+### PUT /api/sources/selection
+
+PowerShell:
+
+```powershell
+Invoke-RestMethod `
+  -Method Put `
+  -Uri http://127.0.0.1:4827/api/sources/selection `
+  -ContentType "application/json" `
+  -Body '{"appId":"com.squirrel.Discord.Discord","enabled":true}'
+```
+
+Example response:
+
+```json
+{
+  "appId": "com.squirrel.Discord.Discord",
+  "displayName": "Discord",
+  "enabled": true,
+  "firstSeenAt": "2026-06-21T13:00:00.0000000Z",
+  "lastSeenAt": "2026-06-21T13:30:00.0000000Z"
+}
+```
+
+Unknown app IDs return `404`. Malformed requests return `400`.
+
+### GET /api/notifications
+
+PowerShell:
+
+```powershell
+Invoke-RestMethod "http://127.0.0.1:4827/api/notifications?limit=100"
+```
+
+Cursor pagination:
+
+```powershell
+Invoke-RestMethod "http://127.0.0.1:4827/api/notifications?limit=100&beforeId=1234"
+```
+
+Rules:
+
+- default `limit` is `100`;
+- maximum `limit` is `500`;
+- `beforeId` returns notifications with a lower SQLite notification ID;
+- results are newest first;
+- only currently enabled sources are returned;
+- raw text elements and diagnostic metadata are not exposed.
+
+Example response:
+
+```json
+[
+  {
+    "id": 1235,
+    "appId": "com.squirrel.Discord.Discord",
+    "sourceApp": "Discord",
+    "timestamp": "2026-06-21T13:32:08.0000000Z",
+    "primaryText": "Scanner Bot",
+    "messageText": "NVDA breaking premarket high"
+  }
+]
+```
+
+`sourceApp`, `timestamp`, `primaryText`, and `messageText` are produced through `NotificationDisplayMapper`.
+
+### GET /api/events
+
+Server-Sent Events stream for newly stored notifications.
+
+PowerShell/curl:
+
+```powershell
+curl.exe -N http://127.0.0.1:4827/api/events
+```
+
+Replay newer stored notifications before continuing live:
+
+```powershell
+curl.exe -N "http://127.0.0.1:4827/api/events?afterId=1234"
+```
+
+Event shape:
+
+```text
+event: notification
+id: 1235
+data: {"id":1235,"appId":"com.squirrel.Discord.Discord","sourceApp":"Discord","timestamp":"2026-06-21T13:32:08.0000000Z","primaryText":"Scanner Bot","messageText":"NVDA breaking premarket high"}
+```
+
+SSE behaviour:
+
+- publishes only after a genuinely new notification is successfully stored;
+- streams only currently enabled sources;
+- uses the same response model and `NotificationDisplayMapper` as `GET /api/notifications`;
+- `afterId` replays stored notifications with a higher SQLite notification ID before live events;
+- subscriber queues are bounded;
+- heartbeat comments are sent periodically;
+- client disconnects clean up subscribers.
+
 ## Automated Tests
 
 The collector and storage logic are tested without real Windows notifications.
@@ -217,6 +415,11 @@ The tests cover:
 - preservation of URLs, tickers, prices, percentages, emoji, symbols, and multiline text in display mapping;
 - normal terminal output excluding debug metadata;
 - debug raw output including raw values and Unicode code-point diagnostics.
+- health endpoint;
+- source listing and source selection API;
+- notification pagination and enabled-source filtering;
+- API display mapping and raw-field exclusion;
+- SSE live delivery, `afterId` replay, disabled-source exclusion, and subscriber cleanup.
 
 ## Manual Verification
 
@@ -233,6 +436,10 @@ The tests cover:
 11. Leave the same Discord toast visible for several polls and confirm it does not print repeatedly.
 12. Trigger rapid Discord notifications and confirm each visible notification appears once.
 13. Run with `--listen --print-content --debug-raw`, trigger one enabled-source notification, and confirm raw fields plus Unicode code points print only in debug mode.
-14. Stop with `Ctrl+C` and confirm shutdown is clean.
+14. Start server mode with `--serve`.
+15. Open `http://127.0.0.1:4827/api/health` and confirm JSON is returned.
+16. Run `curl.exe -N http://127.0.0.1:4827/api/events`.
+17. Trigger an enabled-source notification and confirm one `event: notification` SSE event is printed.
+18. Stop with `Ctrl+C` and confirm shutdown is clean.
 
 Because disabled-source content is intentionally not stored, use the automated tests to verify the SQLite privacy rule directly.
