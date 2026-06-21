@@ -41,7 +41,7 @@ Display mapping:
 - If body is missing, use the remaining non-empty raw text elements in order as `messageText`, joined with newlines.
 - Preserve multiline structure when combining elements.
 - If `primaryText` and `messageText` are exact duplicates after trimming, show the content once as `primaryText`.
-- Do not add Discord-specific parsing.
+- Optional source-aware display metadata may be derived after the generic display fields are mapped.
 
 The display mapper must preserve:
 
@@ -121,11 +121,18 @@ Remaining limitation: this finding applies only to the inspected stored rows. Fu
 
 Cleanup belongs in a shared display mapper when reading notification data for display.
 
+Discord context is derived separately from raw stored notification fields when reading for API, SSE, or UI display. It is best-effort presentation metadata only:
+
+- use it for server tabs and channel columns in the Discord view;
+- preserve generic `primaryText` and `messageText`;
+- return an unknown/fallback context when Discord text cannot be parsed;
+- never hide a notification because parsing failed.
+
 Do not:
 
 - mutate captured notification text;
 - rewrite stored notification text;
 - migrate the database just for display cleanup;
-- parse Discord-specific sender/channel/server fields in V1.
+- require Discord-specific fields for capture, storage, deduplication, retention, or source selection.
 
 Keep raw/debug fields available for developer diagnostics, but keep normal output compact and generic.

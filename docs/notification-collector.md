@@ -6,7 +6,9 @@ This is a Windows notification collector and compact browser dashboard with thre
 - loopback HTTP API and Server-Sent Events mode with `--serve`;
 - compiled React dashboard served by the same `--serve` process at `http://127.0.0.1:4827/`.
 
-It does not include `start.bat`, Discord-specific parsing, MSIX packaging, WebSockets, broad CORS, cloud services, telemetry, or AI filtering.
+It does not include `start.bat`, MSIX packaging, WebSockets, broad CORS, cloud services, telemetry, or AI filtering.
+
+The dashboard includes an optional Discord view that derives server/channel presentation metadata from stored Discord notification text. That metadata is best-effort and does not affect capture, source selection, storage, deduplication, or retention.
 
 The collector can persist enabled-source notifications to SQLite. Terminal content printing remains opt-in with `--print-content` because titles, bodies, and raw text elements may contain private information.
 
@@ -426,6 +428,7 @@ Example recovery:
 The dashboard is a compact single page with:
 
 - a merged newest-first feed from enabled sources;
+- an optional Discord view with server tabs and channel columns when Discord is enabled;
 - live updates through `GET /api/events`;
 - a Sources panel backed by `GET /api/sources` and `PUT /api/sources/selection`;
 - a `Load older` button backed by `GET /api/notifications?limit=100&beforeId=<oldest-id>`.
@@ -439,9 +442,12 @@ sourceApp
 timestamp
 primaryText
 messageText
+discord
 ```
 
-It does not render raw text elements, Windows notification IDs, captured timestamps, debug fields, or backend mapping internals.
+The optional `discord` object contains best-effort display metadata for Discord notifications. It is used only for grouping in the Discord view.
+
+The UI does not render raw text elements, Windows notification IDs, captured timestamps, debug fields, or backend mapping internals.
 
 On startup, the dashboard calls:
 
@@ -568,12 +574,18 @@ Example response:
     "sourceApp": "Discord",
     "timestamp": "2026-06-21T13:32:08.0000000Z",
     "primaryText": "Scanner Bot",
-    "messageText": "NVDA breaking premarket high"
+    "messageText": "NVDA breaking premarket high",
+    "discord": {
+      "sender": "Scanner Bot",
+      "server": "Main Chat",
+      "channel": "#stocks-and-options",
+      "confidence": "parsed"
+    }
   }
 ]
 ```
 
-`sourceApp`, `timestamp`, `primaryText`, and `messageText` are produced through `NotificationDisplayMapper`.
+`sourceApp`, `timestamp`, `primaryText`, and `messageText` are produced through `NotificationDisplayMapper`. `discord` is `null` for non-Discord notifications. For Discord notifications that cannot be parsed, `discord.confidence` is `unknown` and the UI places the item in a fallback group.
 
 ### GET /api/events
 
@@ -596,7 +608,7 @@ Event shape:
 ```text
 event: notification
 id: 1235
-data: {"id":1235,"appId":"com.squirrel.Discord.Discord","sourceApp":"Discord","timestamp":"2026-06-21T13:32:08.0000000Z","primaryText":"Scanner Bot","messageText":"NVDA breaking premarket high"}
+data: {"id":1235,"appId":"com.squirrel.Discord.Discord","sourceApp":"Discord","timestamp":"2026-06-21T13:32:08.0000000Z","primaryText":"Scanner Bot","messageText":"NVDA breaking premarket high","discord":{"sender":"Scanner Bot","server":"Main Chat","channel":"#stocks-and-options","confidence":"parsed"}}
 ```
 
 SSE behaviour:
