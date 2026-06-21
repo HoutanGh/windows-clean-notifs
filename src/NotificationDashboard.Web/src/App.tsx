@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError, createHttpDashboardApi, type DashboardApi } from './api';
 import { createBrowserNotificationEventSource, type NotificationEventSourceFactory } from './events';
 import type { HealthResponse, NotificationItem, NotificationSource } from './types';
@@ -390,9 +390,13 @@ function DiscordBoard({ channels }: { channels: DiscordChannelGroup[] }) {
     return <StateMessage title="No Discord notifications yet" />;
   }
 
+  const columnStyle = {
+    '--discord-channel-count': channels.length
+  } as CSSProperties;
+
   return (
     <section className="discord-board" aria-label="Discord notifications">
-      <div className="discord-columns" data-testid="discord-columns">
+      <div className="discord-columns" data-testid="discord-columns" style={columnStyle}>
         {channels.map((channel) => (
           <section
             key={channel.name}

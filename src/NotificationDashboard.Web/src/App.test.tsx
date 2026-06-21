@@ -237,6 +237,7 @@ describe('App', () => {
     expect(screen.getByText('Trader Bot')).toBeInTheDocument();
     expect(screen.getByText('NVDA breaking premarket high')).toBeInTheDocument();
     expect(screen.getByText('TSLA alert')).toBeInTheDocument();
+    expect(screen.getByTestId('discord-columns')).toHaveStyle('--discord-channel-count: 3');
     expect(screen.queryByRole('tab', { name: 'Main Chat' })).not.toBeInTheDocument();
   });
 

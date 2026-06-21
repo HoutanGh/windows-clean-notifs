@@ -160,7 +160,8 @@ h3 {
 }
 
 .feed-shell {
-  max-width: 1180px;
+  width: 100%;
+  max-width: none;
   margin: 0 auto;
   padding: 14px 20px 36px;
 }
@@ -238,10 +239,8 @@ h3 {
 
 .discord-columns {
   display: grid;
-  grid-auto-columns: minmax(280px, 360px);
-  grid-auto-flow: column;
+  grid-template-columns: repeat(var(--discord-channel-count), minmax(0, 1fr));
   gap: 12px;
-  overflow-x: auto;
   padding-bottom: 8px;
 }
 
