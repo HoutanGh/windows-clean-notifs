@@ -189,6 +189,7 @@ internal static class Program
             PollInterval: options.PollInterval,
             RetentionWindow: RetentionWindow,
             FrontendAssetsPath: frontendAssetsPath);
+        var dashboardUri = GetDashboardUri(options.Port);
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             Args = [],
@@ -207,10 +208,18 @@ internal static class Program
         }
         catch (IOException ex)
         {
-            Console.Error.WriteLine($"Could not start API on http://127.0.0.1:{options.Port}: {ex.Message}");
-            Console.Error.WriteLine("Another process may already be using that port. Re-run with --port <number>.");
+            foreach (var line in FormatPortConflictMessage(options.Port, ex.Message))
+            {
+                Console.Error.WriteLine(line);
+            }
+
             return 1;
         }
+
+        var browserOpener = new DashboardBrowserOpener(
+            new ShellDashboardBrowserLauncher(),
+            Console.Error);
+        browserOpener.OpenAfterServerStarted(options.OpenBrowser, dashboardUri);
 
         Console.WriteLine(options.PrintContent
             ? "Content printing is ON for enabled sources because --print-content was supplied."
@@ -222,7 +231,7 @@ internal static class Program
 
         Console.WriteLine("Newly discovered sources are disabled by default.");
         Console.WriteLine($"Polling visible toast notifications every {FormatInterval(options.PollInterval)}.");
-        Console.WriteLine($"Local dashboard: http://127.0.0.1:{options.Port.ToString(CultureInfo.InvariantCulture)}");
+        Console.WriteLine($"Local dashboard: {dashboardUri}");
         Console.WriteLine($"Local API: http://127.0.0.1:{options.Port.ToString(CultureInfo.InvariantCulture)}/api/health");
         if (!NotificationApi.FrontendAssetsAreBuilt(frontendAssetsPath))
         {
@@ -580,6 +589,22 @@ internal static class Program
         return timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff zzz", CultureInfo.InvariantCulture);
     }
 
+    internal static Uri GetDashboardUri(int port)
+    {
+        return new Uri($"http://127.0.0.1:{port.ToString(CultureInfo.InvariantCulture)}/");
+    }
+
+    internal static IReadOnlyList<string> FormatPortConflictMessage(int port, string details)
+    {
+        var dashboardUri = GetDashboardUri(port);
+        return
+        [
+            $"Could not start dashboard because {dashboardUri} is unavailable.",
+            $"Port {port.ToString(CultureInfo.InvariantCulture)} may already be in use. Try: .\\notifs.cmd --port 4900",
+            $"Details: {details}"
+        ];
+    }
+
     private static void PrintUsage()
     {
         Console.WriteLine("Windows notification collector");
@@ -591,7 +616,7 @@ internal static class Program
         Console.WriteLine("  NotificationInspector.exe --enable-source <app-id>");
         Console.WriteLine("  NotificationInspector.exe --disable-source <app-id>");
         Console.WriteLine("  NotificationInspector.exe --listen [--print-content] [--debug-raw] [--poll-interval <seconds>]");
-        Console.WriteLine("  NotificationInspector.exe --serve [--print-content] [--debug-raw] [--poll-interval <seconds>] [--port <number>]");
+        Console.WriteLine("  NotificationInspector.exe --serve [--open-browser] [--print-content] [--debug-raw] [--poll-interval <seconds>] [--port <number>]");
         Console.WriteLine();
         Console.WriteLine("Options:");
         Console.WriteLine("  --check-access             Print current UserNotificationListener access and exit.");
@@ -601,6 +626,7 @@ internal static class Program
         Console.WriteLine("  --disable-source <app-id>  Disable storage for a discovered source.");
         Console.WriteLine("  --listen                   Poll visible toast notifications and store enabled-source toasts.");
         Console.WriteLine("  --serve                    Poll notifications and expose the loopback HTTP API/SSE server.");
+        Console.WriteLine("  --open-browser             With --serve, open the dashboard URL once after the server starts.");
         Console.WriteLine("  --print-content            Print concise enabled-source notification contents to the terminal.");
         Console.WriteLine("  --debug-raw                With --print-content, include raw fields and Unicode diagnostics.");
         Console.WriteLine("  --poll-interval <seconds>  Polling interval. Defaults to 1.");
@@ -608,11 +634,12 @@ internal static class Program
         Console.WriteLine("  --help                     Show this help.");
     }
 
-    private sealed record Options(
+    internal sealed record Options(
         bool CheckAccess,
         bool RequestAccess,
         bool Listen,
         bool Serve,
+        bool OpenBrowser,
         bool PrintContent,
         bool DebugRaw,
         bool ListSources,
@@ -629,6 +656,7 @@ internal static class Program
                 RequestAccess: false,
                 Listen: false,
                 Serve: false,
+                OpenBrowser: false,
                 PrintContent: false,
                 DebugRaw: false,
                 ListSources: false,
@@ -647,6 +675,7 @@ internal static class Program
             var requestAccess = false;
             var listen = false;
             var serve = false;
+            var openBrowser = false;
             var printContent = false;
             var debugRaw = false;
             var listSources = false;
@@ -690,6 +719,9 @@ internal static class Program
                         break;
                     case "--serve":
                         serve = true;
+                        break;
+                    case "--open-browser":
+                        openBrowser = true;
                         break;
                     case "--print-content":
                         printContent = true;
@@ -755,12 +787,18 @@ internal static class Program
                 return new OptionsParseResult(defaultOptions, "Use --listen or --serve, not both.");
             }
 
+            if (openBrowser && !serve)
+            {
+                return new OptionsParseResult(defaultOptions, "--open-browser requires --serve.");
+            }
+
             return new OptionsParseResult(
                 new Options(
                     checkAccess,
                     requestAccess,
                     listen,
                     serve,
+                    openBrowser,
                     printContent,
                     debugRaw,
                     listSources,
@@ -773,5 +811,5 @@ internal static class Program
         }
     }
 
-    private sealed record OptionsParseResult(Options Options, string? Error);
+    internal sealed record OptionsParseResult(Options Options, string? Error);
 }
