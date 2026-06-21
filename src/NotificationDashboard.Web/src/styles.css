@@ -50,6 +50,7 @@ input {
 
 h1,
 h2,
+h3,
 p {
   margin: 0;
 }
@@ -61,6 +62,11 @@ h1 {
 
 h2 {
   font-size: 17px;
+  font-weight: 650;
+}
+
+h3 {
+  font-size: 14px;
   font-weight: 650;
 }
 
@@ -117,8 +123,48 @@ h2 {
   background: transparent;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.view-switch,
+.server-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid #c5cdd5;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.view-switch button,
+.server-tabs button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #52606c;
+  cursor: pointer;
+}
+
+.view-switch button:hover,
+.server-tabs button:hover {
+  background: #eef1f4;
+  color: #1d2329;
+}
+
+.view-switch button.active,
+.server-tabs button.active {
+  background: #1d2329;
+  color: #ffffff;
+}
+
 .feed-shell {
-  max-width: 980px;
+  max-width: 1180px;
   margin: 0 auto;
   padding: 14px 20px 36px;
 }
@@ -186,6 +232,102 @@ h2 {
   display: flex;
   justify-content: center;
   padding: 16px 0 0;
+}
+
+.discord-board {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.server-tabs {
+  max-width: 100%;
+  overflow-x: auto;
+  align-self: flex-start;
+}
+
+.server-tabs button {
+  white-space: nowrap;
+}
+
+.discord-columns {
+  display: grid;
+  grid-auto-columns: minmax(280px, 360px);
+  grid-auto-flow: column;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.discord-channel-column {
+  min-width: 0;
+  border: 1px solid #d8dee4;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.discord-channel-column header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 40px;
+  padding: 9px 10px;
+  border-bottom: 1px solid #e2e6ea;
+}
+
+.discord-channel-column h3 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.discord-channel-column header span {
+  min-width: 24px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #eef1f4;
+  color: #52606c;
+  font-size: 12px;
+  text-align: center;
+}
+
+.discord-channel-column ol {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.discord-card {
+  padding: 10px;
+  border-bottom: 1px solid #edf0f2;
+}
+
+.discord-card:last-child {
+  border-bottom: 0;
+}
+
+.discord-card time {
+  display: block;
+  color: #65717c;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.discord-card strong {
+  display: block;
+  margin-top: 3px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.discord-card p {
+  margin-top: 4px;
+  line-height: 1.38;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .sources-panel {
@@ -266,7 +408,14 @@ h2 {
 
 @media (max-width: 700px) {
   .app-header {
+    align-items: flex-start;
+    flex-direction: column;
     padding: 10px 14px;
+  }
+
+  .header-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .feed-shell {
@@ -285,6 +434,13 @@ h2 {
   .sources-panel {
     inset: 68px 12px auto 12px;
     width: auto;
+  }
+
+  .discord-columns {
+    grid-auto-flow: row;
+    grid-auto-columns: initial;
+    grid-template-columns: minmax(0, 1fr);
+    overflow-x: visible;
   }
 }
 
@@ -319,9 +475,35 @@ h2 {
     background: #293139;
   }
 
+  .view-switch,
+  .server-tabs,
+  .discord-channel-column {
+    border-color: #3a444d;
+    background: #171b1f;
+  }
+
+  .view-switch button,
+  .server-tabs button {
+    color: #a5b0ba;
+  }
+
+  .view-switch button:hover,
+  .server-tabs button:hover {
+    background: #293139;
+    color: #eef1f4;
+  }
+
+  .view-switch button.active,
+  .server-tabs button.active {
+    background: #eef1f4;
+    color: #111416;
+  }
+
   .notification-row,
   .state-message,
-  .source-row {
+  .source-row,
+  .discord-channel-column header,
+  .discord-card {
     border-color: #2b333a;
   }
 
@@ -333,6 +515,11 @@ h2 {
     border-color: #3a444d;
     background: #171b1f;
     box-shadow: 0 18px 45px rgba(0, 0, 0, 0.4);
+  }
+
+  .discord-channel-column header span {
+    background: #293139;
+    color: #a5b0ba;
   }
 
   .error-text {

@@ -5,12 +5,27 @@ import type { HealthResponse, NotificationItem, NotificationSource } from './typ
 
 const PageSize = 100;
 const defaultApi = createHttpDashboardApi();
+const DiscordAppId = 'com.squirrel.Discord.Discord';
+const UngroupedLabel = 'Ungrouped';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'unavailable';
+type ViewMode = 'feed' | 'discord';
 
 type AppProps = {
   api?: DashboardApi;
   createEventSource?: NotificationEventSourceFactory;
+};
+
+type DiscordChannelGroup = {
+  name: string;
+  latestId: number;
+  notifications: NotificationItem[];
+};
+
+type DiscordServerGroup = {
+  name: string;
+  latestId: number;
+  channels: DiscordChannelGroup[];
 };
 
 export function App({
@@ -32,11 +47,30 @@ export function App({
   const [streamCursor, setStreamCursor] = useState<number | undefined>();
   const [streamVersion, setStreamVersion] = useState(0);
   const [streamReady, setStreamReady] = useState(false);
+  const [activeView, setActiveView] = useState<ViewMode>('feed');
 
   const enabledSourceCount = useMemo(
     () => sources.filter((source) => source.enabled).length,
     [sources]
   );
+  const discordAvailable = useMemo(
+    () => sources.some((source) => source.enabled && isDiscordSource(source)),
+    [sources]
+  );
+  const discordNotifications = useMemo(
+    () => sortNewestFirst(notifications.filter(isDiscordNotification)),
+    [notifications]
+  );
+  const discordGroups = useMemo(
+    () => groupDiscordNotifications(discordNotifications),
+    [discordNotifications]
+  );
+
+  useEffect(() => {
+    if (activeView === 'discord' && !discordAvailable) {
+      setActiveView('feed');
+    }
+  }, [activeView, discordAvailable]);
 
   const replaceNotifications = useCallback(async () => {
     const nextNotifications = sortNewestFirst(await api.getNotifications({ limit: PageSize }));
@@ -212,9 +246,33 @@ export function App({
             {connectionLabel(connectionStatus)}
           </p>
         </div>
-        <button type="button" className="button" onClick={openSources}>
-          Sources
-        </button>
+        <div className="header-actions">
+          {discordAvailable ? (
+            <div className="view-switch" role="tablist" aria-label="View">
+              <button
+                type="button"
+                role="tab"
+                className={activeView === 'feed' ? 'active' : undefined}
+                aria-selected={activeView === 'feed'}
+                onClick={() => setActiveView('feed')}
+              >
+                Feed
+              </button>
+              <button
+                type="button"
+                role="tab"
+                className={activeView === 'discord' ? 'active' : undefined}
+                aria-selected={activeView === 'discord'}
+                onClick={() => setActiveView('discord')}
+              >
+                Discord
+              </button>
+            </div>
+          ) : null}
+          <button type="button" className="button" onClick={openSources}>
+            Sources
+          </button>
+        </div>
       </header>
 
       <main className="feed-shell">
@@ -234,16 +292,31 @@ export function App({
         && !feedError
         && health?.listenerAccessStatus === 'Allowed'
         && enabledSourceCount > 0
+        && activeView === 'feed'
         && notifications.length === 0 ? (
           <StateMessage title="No notifications yet" detail="Enabled sources will appear here when Windows exposes new toasts." />
         ) : null}
 
-        {notifications.length > 0 ? (
+        {!loading
+        && !feedError
+        && health?.listenerAccessStatus === 'Allowed'
+        && enabledSourceCount > 0
+        && activeView === 'discord'
+        && discordAvailable
+        && discordNotifications.length === 0 ? (
+          <StateMessage title="No Discord notifications yet" detail="Discord notifications will appear here when Windows exposes new toasts." />
+        ) : null}
+
+        {activeView === 'feed' && notifications.length > 0 ? (
           <ol className="notification-feed" aria-label="Notifications">
             {notifications.map((notification) => (
               <NotificationRow key={notification.id} notification={notification} />
             ))}
           </ol>
+        ) : null}
+
+        {activeView === 'discord' && discordAvailable && discordNotifications.length > 0 ? (
+          <DiscordBoard groups={discordGroups} />
         ) : null}
 
         {notifications.length > 0 && hasOlder ? (
@@ -318,6 +391,82 @@ function NotificationRow({ notification }: { notification: NotificationItem }) {
   );
 }
 
+function DiscordBoard({ groups }: { groups: DiscordServerGroup[] }) {
+  const [selectedServerName, setSelectedServerName] = useState(groups[0]?.name ?? UngroupedLabel);
+
+  useEffect(() => {
+    if (groups.length === 0) {
+      return;
+    }
+
+    if (!groups.some((group) => group.name === selectedServerName)) {
+      setSelectedServerName(groups[0].name);
+    }
+  }, [groups, selectedServerName]);
+
+  if (groups.length === 0) {
+    return <StateMessage title="No Discord notifications yet" />;
+  }
+
+  const selectedServer = groups.find((group) => group.name === selectedServerName) ?? groups[0];
+
+  return (
+    <section className="discord-board" aria-label="Discord notifications">
+      <div className="server-tabs" role="tablist" aria-label="Discord servers">
+        {groups.map((group) => (
+          <button
+            key={group.name}
+            type="button"
+            role="tab"
+            className={group.name === selectedServer.name ? 'active' : undefined}
+            aria-selected={group.name === selectedServer.name}
+            onClick={() => setSelectedServerName(group.name)}
+          >
+            {group.name}
+          </button>
+        ))}
+      </div>
+
+      <div className="discord-columns" data-testid="discord-columns">
+        {selectedServer.channels.map((channel) => (
+          <section
+            key={channel.name}
+            className="discord-channel-column"
+            data-testid="discord-channel-column"
+            aria-label={`${channel.name} channel`}
+          >
+            <header>
+              <h3>{channel.name}</h3>
+              <span>{channel.notifications.length}</span>
+            </header>
+            <ol>
+              {channel.notifications.map((notification) => (
+                <DiscordNotificationCard key={notification.id} notification={notification} />
+              ))}
+            </ol>
+          </section>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function DiscordNotificationCard({ notification }: { notification: NotificationItem }) {
+  const sender = normalizeGroupLabel(notification.discord?.sender)
+    ?? normalizeGroupLabel(notification.primaryText)
+    ?? notification.sourceApp;
+
+  return (
+    <li className="discord-card" data-testid="discord-notification-card" data-id={notification.id}>
+      <time dateTime={notification.timestamp}>{formatLocalTimestamp(notification.timestamp)}</time>
+      <strong>{sender}</strong>
+      {isPresent(notification.messageText) ? (
+        <p>{notification.messageText}</p>
+      ) : null}
+    </li>
+  );
+}
+
 function StateMessage({ title, detail }: { title: string; detail?: string }) {
   return (
     <div className="state-message">
@@ -339,6 +488,59 @@ function sortSources(items: NotificationSource[]): NotificationSource[] {
 
     return (left.displayName || left.appId).localeCompare(right.displayName || right.appId);
   });
+}
+
+function groupDiscordNotifications(items: NotificationItem[]): DiscordServerGroup[] {
+  const serverMap = new Map<string, Map<string, NotificationItem[]>>();
+
+  for (const notification of items) {
+    const serverName = normalizeGroupLabel(notification.discord?.server) ?? UngroupedLabel;
+    const channelName = normalizeGroupLabel(notification.discord?.channel) ?? UngroupedLabel;
+    const channelMap = serverMap.get(serverName) ?? new Map<string, NotificationItem[]>();
+    const channelItems = channelMap.get(channelName) ?? [];
+
+    channelItems.push(notification);
+    channelMap.set(channelName, channelItems);
+    serverMap.set(serverName, channelMap);
+  }
+
+  return [...serverMap.entries()]
+    .map(([serverName, channelMap]) => {
+      const channels = [...channelMap.entries()]
+        .map(([channelName, notifications]) => {
+          const sortedNotifications = sortNewestFirst(notifications);
+          return {
+            name: channelName,
+            latestId: getHighestId(sortedNotifications) ?? 0,
+            notifications: sortedNotifications
+          };
+        })
+        .sort((left, right) => right.latestId - left.latestId || left.name.localeCompare(right.name));
+
+      return {
+        name: serverName,
+        latestId: Math.max(...channels.map((channel) => channel.latestId)),
+        channels
+      };
+    })
+    .sort((left, right) => right.latestId - left.latestId || left.name.localeCompare(right.name));
+}
+
+function isDiscordSource(source: NotificationSource): boolean {
+  const appId = source.appId.toLowerCase();
+  const displayName = source.displayName.toLowerCase();
+
+  return appId === DiscordAppId.toLowerCase()
+    || (appId.includes('discord') && displayName.includes('discord'));
+}
+
+function isDiscordNotification(notification: NotificationItem): boolean {
+  return notification.discord !== null && notification.discord !== undefined;
+}
+
+function normalizeGroupLabel(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : null;
 }
 
 function mergeNotification(current: NotificationItem[], next: NotificationItem): NotificationItem[] {

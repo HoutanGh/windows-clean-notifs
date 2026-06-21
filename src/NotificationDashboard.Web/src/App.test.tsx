@@ -218,6 +218,70 @@ describe('App', () => {
     expect(await screen.findByText('Backend unavailable')).toBeInTheDocument();
     expect(screen.getByText('Database failed.')).toBeInTheDocument();
   });
+
+  test('renders Discord view with server tabs and channel columns', async () => {
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(42, 'Main Chat', '#stocks-and-options', 'Trader Bot', 'NVDA breaking premarket high'),
+        discordNotification(41, 'Main Chat', '#main', 'Alice', 'Morning all'),
+        discordNotification(40, 'Other Server', '#alerts', 'Scanner', 'TSLA alert')
+      ])
+    });
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+
+    expect(await screen.findByRole('tab', { name: 'Main Chat' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Other Server' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '#stocks-and-options' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '#main' })).toBeInTheDocument();
+    expect(screen.getByText('Trader Bot')).toBeInTheDocument();
+    expect(screen.getByText('NVDA breaking premarket high')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '#alerts' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Other Server' }));
+
+    expect(screen.getByRole('heading', { name: '#alerts' })).toBeInTheDocument();
+    expect(screen.getByText('TSLA alert')).toBeInTheDocument();
+  });
+
+  test('keeps unparsed Discord notifications visible in Ungrouped', async () => {
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        notification(50, {
+          appId: 'com.squirrel.Discord.Discord',
+          sourceApp: 'Discord',
+          primaryText: 'Standalone Discord title',
+          messageText: 'Still visible',
+          discord: {
+            confidence: 'unknown'
+          }
+        })
+      ])
+    });
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+
+    expect(await screen.findByRole('tab', { name: 'Ungrouped' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Ungrouped' })).toBeInTheDocument();
+    expect(screen.getByText('Standalone Discord title')).toBeInTheDocument();
+    expect(screen.getByText('Still visible')).toBeInTheDocument();
+  });
+
+  test('hides Discord view when Discord is not enabled', async () => {
+    const api = createApi({
+      getSources: vi.fn().mockResolvedValue([source('Outlook', 'app.outlook', true)]),
+      getNotifications: vi.fn().mockResolvedValue([
+        notification(60, { sourceApp: 'Outlook', primaryText: 'Meeting reminder' })
+      ])
+    });
+
+    renderApp(api);
+
+    expect(await screen.findByText('Meeting reminder')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Discord' })).not.toBeInTheDocument();
+  });
 });
 
 function renderApp(api: DashboardApi, createEventSource = createFakeEventSourceFactory().factory) {
@@ -246,6 +310,27 @@ function notification(id: number, overrides: Partial<NotificationItem> = {}): No
     messageText: `Message ${id}`,
     ...overrides
   };
+}
+
+function discordNotification(
+  id: number,
+  server: string,
+  channel: string,
+  sender: string,
+  message: string
+): NotificationItem {
+  return notification(id, {
+    appId: 'com.squirrel.Discord.Discord',
+    sourceApp: 'Discord',
+    primaryText: `${sender} (${channel}, ${server})`,
+    messageText: message,
+    discord: {
+      sender,
+      server,
+      channel,
+      confidence: 'parsed'
+    }
+  });
 }
 
 function source(displayName: string, appId: string, enabled: boolean): NotificationSource {

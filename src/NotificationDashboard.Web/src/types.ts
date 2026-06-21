@@ -15,6 +15,14 @@ export type NotificationItem = {
   timestamp: string;
   primaryText?: string | null;
   messageText?: string | null;
+  discord?: DiscordNotificationContext | null;
+};
+
+export type DiscordNotificationContext = {
+  sender?: string | null;
+  server?: string | null;
+  channel?: string | null;
+  confidence: 'parsed' | 'unknown' | string;
 };
 
 export type NotificationSource = {
