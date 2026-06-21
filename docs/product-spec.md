@@ -3,11 +3,11 @@
 ## Product goal
 Build a lightweight, local Windows 11 dashboard that displays notifications only from applications selected by the user.
 
-**Primary personal use case:** Keep Discord minimised while viewing its Windows notifications in a clean browser feed.
+**Primary personal use case:** Keep Discord minimised while viewing its Windows notifications in a clean browser feed or Discord-focused view.
 
 **Success condition:** I can work with Discord closed to the taskbar or minimised and still see its notifications in a compact live feed.
 
-Discord is only a use case in V1. The product must not contain Discord-specific parsing, server tabs, channel detection, or channel filtering.
+The product remains a local Windows notification dashboard first. Capture, source selection, storage, retention, and privacy must stay generic. Discord may receive an optional enhanced presentation because Discord Windows notifications expose useful sender, channel, and server text.
 
 ## Core user flow
 
@@ -17,7 +17,9 @@ Discord is only a use case in V1. The product must not contain Discord-specific 
 4. The user opens the URL in a normal browser tab.
 5. On first use, the app requests Windows notification-access permission.
 6. The user opens **Sources** and enables applications such as Discord.
-7. New notifications from enabled applications appear in the feed automatically.
+7. New notifications from enabled applications appear automatically.
+8. The user can use the generic **Feed** view for all enabled sources.
+9. When Discord is enabled, the user can switch to a Discord-focused view with server tabs and channel columns.
 
 Closing the browser tab does not stop collection. Closing the terminal process stops the application.
 
@@ -48,7 +50,11 @@ Other detected apps
 
 The list grows only when a previously unseen application produces a Windows notification.
 
-## Feed interface
+## Views
+
+The app has a generic notification view and may have source-aware enhanced views.
+
+### Generic Feed
 
 Use one merged, vertically scrolling feed for all enabled applications.
 
@@ -65,7 +71,7 @@ Behaviour:
 - Text wraps and is not intentionally truncated.
 - New items appear without refreshing the page.
 - No avatars, images, reactions, reply controls, buttons, pop-ups, or click-through actions.
-- No app-specific grouping, tabs, columns, or parsers in V1.
+- Non-Discord notifications remain in the generic feed unless a future source-aware view is explicitly specified.
 
 Example:
 
@@ -78,6 +84,52 @@ NVDA breaking premarket high
 Meeting reminder
 Trading review begins in 10 minutes
 ```
+
+### Discord View
+
+When Discord is enabled, the app may offer an explicit **Discord** view. This view is presentation-only and derives structure from stored Discord notification text.
+
+Layout:
+
+- Discord server names appear as tabs.
+- Within the selected server tab, channels appear as columns.
+- Each column shows newest-first notifications for that channel.
+- Direct messages, group DMs, or unparsable Discord notifications appear in an **Ungrouped** or equivalent fallback area.
+- Switching view modes does not change source selection, storage, retention, or notification capture.
+
+Derived Discord fields:
+
+```ts
+type DiscordNotificationContext = {
+  sender?: string;
+  server?: string;
+  channel?: string;
+  confidence: "parsed" | "unknown";
+};
+```
+
+The parser is best-effort. It may use observed Discord Windows notification title shapes such as:
+
+```text
+Sender (#channel, Server Name)
+```
+
+Parsing rules:
+
+- Preserve raw captured notification data unchanged.
+- Derive Discord context only when reading data for API, SSE, terminal display, or UI display.
+- Do not require Discord context for storing or deduplicating notifications.
+- Do not hide or drop notifications when parsing fails.
+- Do not rely on Discord server IDs, channel IDs, bot tokens, or Discord APIs in V1.
+- Treat server and channel names as display labels, not stable identifiers.
+- Strip invisible formatting marks only from derived grouping keys when needed; do not mutate stored raw text.
+
+Discord view limitations:
+
+- Discord can change Windows notification text formatting.
+- Server or channel renames may create new display groups.
+- Channels with the same display name in the same server may be indistinguishable.
+- The view only contains notifications that Windows exposes and the collector captures.
 
 ## Retention and privacy
 
@@ -129,6 +181,7 @@ type NotificationRecord = {
   title?: string;
   body?: string;
   rawText: string[];
+  discord?: DiscordNotificationContext;
 };
 ```
 
@@ -177,16 +230,20 @@ The dashboard displays notifications that applications successfully publish to W
 - Source selections survive restart.
 - Feed updates live and orders items newest first.
 - Full available title/body text wraps cleanly.
+- Generic feed mode remains available for all enabled sources.
+- When Discord is enabled, an explicit Discord view can group parsed Discord notifications by server and channel.
+- Discord notifications that cannot be parsed still remain visible in a fallback group.
 - Records survive restart and expire after 72 hours or when the 2,000-record limit is exceeded.
 - All content remains on the local computer.
-- No Discord-specific behaviour exists in V1.
 
 ## Out of scope for V1
 
-- Discord server or channel detection and filtering.
-- App-specific layouts or parsing.
+- Discord API integration, bot tokens, or guaranteed Discord message archive behaviour.
+- Discord replies, reactions, avatars, attachments, or click-through actions.
+- Persistent server/channel selection settings.
+- Source-aware layouts for applications other than Discord unless explicitly specified.
 - AI or keyword filtering.
-- Replies, actions, links, or opening the source application.
+- Generic notification replies, actions, links, or opening the source application.
 - Removing or suppressing native Windows notifications.
 - Enumerating every installed application before it sends a notification.
 - Cloud sync, accounts, telemetry, mobile, macOS, or Linux support.
