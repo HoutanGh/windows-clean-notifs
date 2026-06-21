@@ -7,6 +7,8 @@ namespace WindowsCleanNotifs.NotificationInspector;
 internal static class Program
 {
     private const int UsageError = 64;
+    private static readonly TimeSpan RetentionWindow = TimeSpan.FromHours(72);
+    private static readonly TimeSpan RetentionCleanupInterval = TimeSpan.FromMinutes(15);
     private static readonly object ConsoleGate = new();
 
     public static async Task<int> Main(string[] args)
@@ -38,7 +40,37 @@ internal static class Program
             return 1;
         }
 
+        var store = new SqliteNotificationStore(StoragePaths.GetDefaultDatabasePath());
+        try
+        {
+            await store.InitializeAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Could not initialize notification database: {ex.GetType().Name}: {ex.Message}");
+            return 1;
+        }
+
+        await RunRetentionCleanupAsync(store, DateTimeOffset.Now, CancellationToken.None);
+
+        if (options.ListSources)
+        {
+            await PrintSourcesAsync(store, CancellationToken.None);
+            return 0;
+        }
+
+        if (options.EnableSourceAppId is not null)
+        {
+            return await SetSourceEnabledAsync(store, options.EnableSourceAppId, enabled: true, CancellationToken.None);
+        }
+
+        if (options.DisableSourceAppId is not null)
+        {
+            return await SetSourceEnabledAsync(store, options.DisableSourceAppId, enabled: false, CancellationToken.None);
+        }
+
         PrintPackageIdentity();
+        Console.WriteLine($"Database: {store.DatabasePath}");
 
         UserNotificationListener listener;
         try
@@ -77,19 +109,16 @@ internal static class Program
             return accessStatus == UserNotificationListenerAccessStatus.Allowed ? 0 : 2;
         }
 
-        if (!options.PrintContent)
-        {
-            Console.Error.WriteLine("Refusing to listen without --print-content. This collector prints notification title/body/raw text to the terminal.");
-            return UsageError;
-        }
-
         if (accessStatus != UserNotificationListenerAccessStatus.Allowed)
         {
             PrintAccessAdvice(accessStatus);
             return 2;
         }
 
-        Console.WriteLine("Content printing is ON for this process because --print-content was supplied.");
+        Console.WriteLine(options.PrintContent
+            ? "Content printing is ON for enabled sources because --print-content was supplied."
+            : "Content printing is OFF. Enabled-source notifications will be stored but not printed.");
+        Console.WriteLine("Newly discovered sources are disabled by default.");
         Console.WriteLine($"Polling visible toast notifications every {FormatInterval(options.PollInterval)}.");
         Console.WriteLine("Press Ctrl+C to stop.");
         Console.WriteLine();
@@ -105,10 +134,17 @@ internal static class Program
         var collector = new PollingNotificationCollector(
             provider,
             dedupeRetention: TimeSpan.FromMinutes(10));
+        var storageCoordinator = new NotificationStorageCoordinator(store);
 
         try
         {
-            await RunCollectorAsync(collector, options.PollInterval, cts.Token);
+            await RunCollectorAsync(
+                collector,
+                storageCoordinator,
+                store,
+                options.PollInterval,
+                options.PrintContent,
+                cts.Token);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
@@ -120,10 +156,15 @@ internal static class Program
 
     private static async Task RunCollectorAsync(
         PollingNotificationCollector collector,
+        NotificationStorageCoordinator storageCoordinator,
+        INotificationStore store,
         TimeSpan pollInterval,
+        bool printContent,
         CancellationToken cancellationToken)
     {
-        await SeedUntilSuccessfulAsync(collector, pollInterval, cancellationToken);
+        var nextRetentionCleanup = DateTimeOffset.Now + RetentionCleanupInterval;
+
+        await SeedUntilSuccessfulAsync(collector, storageCoordinator, pollInterval, cancellationToken);
 
         using var timer = new PeriodicTimer(pollInterval);
         while (await timer.WaitForNextTickAsync(cancellationToken))
@@ -131,7 +172,15 @@ internal static class Program
             try
             {
                 var result = await collector.PollOnceAsync(cancellationToken);
-                PrintCollectorResult(result, "poll");
+                var persisted = await storageCoordinator.ApplyAsync(result, storeNewNotifications: true, cancellationToken);
+                PrintPersistedCollectorResult(persisted, "poll", printContent);
+
+                var now = DateTimeOffset.Now;
+                if (now >= nextRetentionCleanup)
+                {
+                    await RunRetentionCleanupAsync(store, now, cancellationToken);
+                    nextRetentionCleanup = now + RetentionCleanupInterval;
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -139,7 +188,7 @@ internal static class Program
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Polling failed at {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz}: {ex.GetType().Name}: {ex.Message}");
+                Console.Error.WriteLine($"Polling/storage failed at {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz}: {ex.GetType().Name}: {ex.Message}");
                 Console.Error.WriteLine("Will retry on the next poll. Access denial is not treated as an empty notification feed.");
             }
         }
@@ -147,6 +196,7 @@ internal static class Program
 
     private static async Task SeedUntilSuccessfulAsync(
         PollingNotificationCollector collector,
+        NotificationStorageCoordinator storageCoordinator,
         TimeSpan retryInterval,
         CancellationToken cancellationToken)
     {
@@ -155,8 +205,9 @@ internal static class Program
             try
             {
                 var startup = await collector.SeedAsync(cancellationToken);
+                var persisted = await storageCoordinator.ApplyAsync(startup, storeNewNotifications: false, cancellationToken);
                 Console.WriteLine($"Startup snapshot visible to listener: {startup.SnapshotCount}");
-                PrintCollectorResult(startup, "startup snapshot");
+                PrintPersistedCollectorResult(persisted, "startup snapshot", printContent: false);
                 Console.WriteLine();
                 return;
             }
@@ -167,22 +218,45 @@ internal static class Program
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"Startup snapshot failed at {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz}: {ex.GetType().Name}: {ex.Message}");
-                Console.Error.WriteLine("Will retry before emitting any notifications so existing toasts are not reported as new.");
+                Console.Error.WriteLine("Will retry before storing new notifications so existing toasts are not captured as new.");
                 await Task.Delay(retryInterval, cancellationToken);
             }
         }
     }
 
-    private static void PrintCollectorResult(CollectorSnapshotResult result, string eventSource)
+    private static async Task RunRetentionCleanupAsync(
+        INotificationStore store,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var deleted = await store.DeleteNotificationsOlderThanAsync(now - RetentionWindow, cancellationToken);
+        if (deleted > 0)
+        {
+            Console.WriteLine($"Retention cleanup deleted {deleted} stored notification(s) older than {RetentionWindow.TotalHours:0} hours.");
+        }
+    }
+
+    private static void PrintPersistedCollectorResult(
+        PersistedCollectorResult result,
+        string eventSource,
+        bool printContent)
     {
         foreach (var source in result.DiscoveredSources)
         {
             PrintSourceDiscovered(source, eventSource);
         }
 
-        foreach (var notification in result.NewNotifications)
+        if (!printContent)
         {
-            PrintNotification(notification, eventSource);
+            return;
+        }
+
+        foreach (var outcome in result.NotificationOutcomes)
+        {
+            if (outcome.Status == NotificationInsertStatus.Stored)
+            {
+                PrintNotification(outcome.Notification, eventSource);
+            }
         }
     }
 
@@ -195,6 +269,7 @@ internal static class Program
             Console.WriteLine($"Event: {eventSource}");
             Console.WriteLine($"App name: {source.AppDisplayName}");
             Console.WriteLine($"App id: {source.AppId}");
+            Console.WriteLine("Enabled: false");
             Console.WriteLine();
         }
     }
@@ -230,6 +305,51 @@ internal static class Program
 
             Console.WriteLine();
         }
+    }
+
+    private static async Task PrintSourcesAsync(
+        INotificationStore store,
+        CancellationToken cancellationToken)
+    {
+        var sources = await store.ListSourcesAsync(cancellationToken);
+        Console.WriteLine($"Database: {store.DatabasePath}");
+
+        if (sources.Count == 0)
+        {
+            Console.WriteLine("No notification sources have been discovered yet.");
+            return;
+        }
+
+        foreach (var source in sources)
+        {
+            Console.WriteLine("----");
+            Console.WriteLine($"App name: {source.AppDisplayName}");
+            Console.WriteLine($"App id: {source.AppId}");
+            Console.WriteLine($"Enabled: {source.Enabled.ToString().ToLowerInvariant()}");
+            Console.WriteLine($"First seen: {FormatTimestamp(source.FirstSeenAt)}");
+            Console.WriteLine($"Last seen: {FormatTimestamp(source.LastSeenAt)}");
+        }
+    }
+
+    private static async Task<int> SetSourceEnabledAsync(
+        INotificationStore store,
+        string appId,
+        bool enabled,
+        CancellationToken cancellationToken)
+    {
+        var changed = await store.SetSourceEnabledAsync(appId, enabled, cancellationToken);
+        if (!changed)
+        {
+            Console.Error.WriteLine($"No source found for app id: {appId}");
+            Console.Error.WriteLine("Run --list-sources after the app has produced at least one Windows notification.");
+            return 2;
+        }
+
+        var source = await store.GetSourceAsync(appId, cancellationToken);
+        var state = enabled ? "enabled" : "disabled";
+        Console.WriteLine($"Source {state}: {source?.AppDisplayName ?? appId}");
+        Console.WriteLine($"App id: {appId}");
+        return 0;
     }
 
     private static void PrintPackageIdentity()
@@ -308,6 +428,11 @@ internal static class Program
         return $"{interval.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)} seconds";
     }
 
+    private static string FormatTimestamp(DateTimeOffset timestamp)
+    {
+        return timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff zzz", CultureInfo.InvariantCulture);
+    }
+
     private static void PrintUsage()
     {
         Console.WriteLine("Windows notification collector spike");
@@ -315,13 +440,19 @@ internal static class Program
         Console.WriteLine("Usage:");
         Console.WriteLine("  NotificationInspector.exe --check-access");
         Console.WriteLine("  NotificationInspector.exe --request-access");
-        Console.WriteLine("  NotificationInspector.exe --listen --request-access --print-content [--poll-interval <seconds>]");
+        Console.WriteLine("  NotificationInspector.exe --list-sources");
+        Console.WriteLine("  NotificationInspector.exe --enable-source <app-id>");
+        Console.WriteLine("  NotificationInspector.exe --disable-source <app-id>");
+        Console.WriteLine("  NotificationInspector.exe --listen [--print-content] [--poll-interval <seconds>]");
         Console.WriteLine();
         Console.WriteLine("Options:");
         Console.WriteLine("  --check-access             Print current UserNotificationListener access and exit.");
         Console.WriteLine("  --request-access           Ask Windows for notification listener access, then print status.");
-        Console.WriteLine("  --listen                   Poll visible toast notifications and print newly detected toasts.");
-        Console.WriteLine("  --print-content            Required with --listen; acknowledges notification contents will be printed.");
+        Console.WriteLine("  --list-sources             Print persisted notification sources and exit.");
+        Console.WriteLine("  --enable-source <app-id>   Enable storage for a discovered source.");
+        Console.WriteLine("  --disable-source <app-id>  Disable storage for a discovered source.");
+        Console.WriteLine("  --listen                   Poll visible toast notifications and store enabled-source toasts.");
+        Console.WriteLine("  --print-content            Print enabled-source notification contents to the terminal.");
         Console.WriteLine("  --poll-interval <seconds>  Polling interval. Defaults to 1.");
         Console.WriteLine("  --help                     Show this help.");
     }
@@ -331,6 +462,9 @@ internal static class Program
         bool RequestAccess,
         bool Listen,
         bool PrintContent,
+        bool ListSources,
+        string? EnableSourceAppId,
+        string? DisableSourceAppId,
         TimeSpan PollInterval,
         bool ShowHelp)
     {
@@ -341,6 +475,9 @@ internal static class Program
                 RequestAccess: false,
                 Listen: false,
                 PrintContent: false,
+                ListSources: false,
+                EnableSourceAppId: null,
+                DisableSourceAppId: null,
                 PollInterval: TimeSpan.FromSeconds(1),
                 ShowHelp: args.Count == 0);
 
@@ -353,6 +490,9 @@ internal static class Program
             var requestAccess = false;
             var listen = false;
             var printContent = false;
+            var listSources = false;
+            string? enableSourceAppId = null;
+            string? disableSourceAppId = null;
             var pollInterval = TimeSpan.FromSeconds(1);
 
             for (var index = 0; index < args.Count; index++)
@@ -365,6 +505,25 @@ internal static class Program
                         break;
                     case "--request-access":
                         requestAccess = true;
+                        break;
+                    case "--list-sources":
+                        listSources = true;
+                        break;
+                    case "--enable-source":
+                        if (index + 1 >= args.Count)
+                        {
+                            return new OptionsParseResult(defaultOptions, "--enable-source requires an app id.");
+                        }
+
+                        enableSourceAppId = args[++index];
+                        break;
+                    case "--disable-source":
+                        if (index + 1 >= args.Count)
+                        {
+                            return new OptionsParseResult(defaultOptions, "--disable-source requires an app id.");
+                        }
+
+                        disableSourceAppId = args[++index];
                         break;
                     case "--listen":
                         listen = true;
@@ -395,8 +554,27 @@ internal static class Program
                 }
             }
 
+            var sourceCommandCount =
+                (listSources ? 1 : 0)
+                + (enableSourceAppId is null ? 0 : 1)
+                + (disableSourceAppId is null ? 0 : 1);
+
+            if (sourceCommandCount > 1)
+            {
+                return new OptionsParseResult(defaultOptions, "Use only one source command at a time.");
+            }
+
             return new OptionsParseResult(
-                new Options(checkAccess, requestAccess, listen, printContent, pollInterval, ShowHelp: false),
+                new Options(
+                    checkAccess,
+                    requestAccess,
+                    listen,
+                    printContent,
+                    listSources,
+                    enableSourceAppId,
+                    disableSourceAppId,
+                    pollInterval,
+                    ShowHelp: false),
                 null);
         }
     }

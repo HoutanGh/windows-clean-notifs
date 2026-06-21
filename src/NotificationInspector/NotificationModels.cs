@@ -22,6 +22,8 @@ public sealed record NotificationSource(
     string AppId);
 
 public sealed record CollectorSnapshotResult(
+    DateTimeOffset ObservedAt,
     int SnapshotCount,
+    IReadOnlyList<NotificationSource> SeenSources,
     IReadOnlyList<NotificationSource> DiscoveredSources,
     IReadOnlyList<CapturedNotification> NewNotifications);

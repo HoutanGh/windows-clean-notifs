@@ -44,14 +44,18 @@ public sealed class PollingNotificationCollector
         bool emitNewNotifications)
     {
         var now = _clock();
+        var seenSourcesByAppId = new Dictionary<string, NotificationSource>(StringComparer.Ordinal);
         var discoveredSources = new List<NotificationSource>();
         var newNotifications = new List<CapturedNotification>();
 
         foreach (var notification in snapshot.OrderBy(item => item.CreationTime).ThenBy(item => item.WindowsNotificationId))
         {
+            var source = new NotificationSource(notification.AppDisplayName, notification.AppId);
+            seenSourcesByAppId[notification.AppId] = source;
+
             if (_knownAppIds.Add(notification.AppId))
             {
-                discoveredSources.Add(new NotificationSource(notification.AppDisplayName, notification.AppId));
+                discoveredSources.Add(source);
             }
 
             var identity = notification.Identity;
@@ -67,7 +71,9 @@ public sealed class PollingNotificationCollector
         PruneStaleIdentities(now);
 
         return new CollectorSnapshotResult(
+            ObservedAt: now,
             SnapshotCount: snapshot.Count,
+            SeenSources: seenSourcesByAppId.Values.ToArray(),
             DiscoveredSources: discoveredSources,
             NewNotifications: newNotifications);
     }
