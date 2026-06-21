@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security;
+using System.Text;
 using Windows.ApplicationModel;
 using Windows.UI.Notifications.Management;
 
@@ -13,6 +15,8 @@ internal static class Program
 
     public static async Task<int> Main(string[] args)
     {
+        ConfigureConsoleEncoding();
+
         var parseResult = Options.Parse(args);
         if (parseResult.Error is not null)
         {
@@ -118,6 +122,11 @@ internal static class Program
         Console.WriteLine(options.PrintContent
             ? "Content printing is ON for enabled sources because --print-content was supplied."
             : "Content printing is OFF. Enabled-source notifications will be stored but not printed.");
+        if (options.DebugRaw)
+        {
+            Console.WriteLine("Raw debug printing is ON because --debug-raw was supplied.");
+        }
+
         Console.WriteLine("Newly discovered sources are disabled by default.");
         Console.WriteLine($"Polling visible toast notifications every {FormatInterval(options.PollInterval)}.");
         Console.WriteLine("Press Ctrl+C to stop.");
@@ -144,6 +153,7 @@ internal static class Program
                 store,
                 options.PollInterval,
                 options.PrintContent,
+                options.DebugRaw,
                 cts.Token);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
@@ -160,6 +170,7 @@ internal static class Program
         INotificationStore store,
         TimeSpan pollInterval,
         bool printContent,
+        bool debugRaw,
         CancellationToken cancellationToken)
     {
         var nextRetentionCleanup = DateTimeOffset.Now + RetentionCleanupInterval;
@@ -173,7 +184,7 @@ internal static class Program
             {
                 var result = await collector.PollOnceAsync(cancellationToken);
                 var persisted = await storageCoordinator.ApplyAsync(result, storeNewNotifications: true, cancellationToken);
-                PrintPersistedCollectorResult(persisted, "poll", printContent);
+                PrintPersistedCollectorResult(persisted, printContent, debugRaw);
 
                 var now = DateTimeOffset.Now;
                 if (now >= nextRetentionCleanup)
@@ -207,7 +218,7 @@ internal static class Program
                 var startup = await collector.SeedAsync(cancellationToken);
                 var persisted = await storageCoordinator.ApplyAsync(startup, storeNewNotifications: false, cancellationToken);
                 Console.WriteLine($"Startup snapshot visible to listener: {startup.SnapshotCount}");
-                PrintPersistedCollectorResult(persisted, "startup snapshot", printContent: false);
+                PrintPersistedCollectorResult(persisted, printContent: false, debugRaw: false);
                 Console.WriteLine();
                 return;
             }
@@ -238,12 +249,12 @@ internal static class Program
 
     private static void PrintPersistedCollectorResult(
         PersistedCollectorResult result,
-        string eventSource,
-        bool printContent)
+        bool printContent,
+        bool debugRaw)
     {
         foreach (var source in result.DiscoveredSources)
         {
-            PrintSourceDiscovered(source, eventSource);
+            PrintSourceDiscovered(source);
         }
 
         if (!printContent)
@@ -255,55 +266,31 @@ internal static class Program
         {
             if (outcome.Status == NotificationInsertStatus.Stored)
             {
-                PrintNotification(outcome.Notification, eventSource);
+                PrintNotification(outcome.Notification, debugRaw);
             }
         }
     }
 
-    private static void PrintSourceDiscovered(NotificationSource source, string eventSource)
+    private static void PrintSourceDiscovered(NotificationSource source)
     {
         lock (ConsoleGate)
         {
             Console.WriteLine("----");
             Console.WriteLine("Source discovered");
-            Console.WriteLine($"Event: {eventSource}");
             Console.WriteLine($"App name: {source.AppDisplayName}");
             Console.WriteLine($"App id: {source.AppId}");
-            Console.WriteLine("Enabled: false");
             Console.WriteLine();
         }
     }
 
-    private static void PrintNotification(CapturedNotification notification, string eventSource)
+    private static void PrintNotification(CapturedNotification notification, bool debugRaw)
     {
         lock (ConsoleGate)
         {
-            Console.WriteLine("----");
-            Console.WriteLine("New notification");
-            Console.WriteLine($"Event: {eventSource}");
-            Console.WriteLine($"App name: {notification.AppDisplayName}");
-            Console.WriteLine($"App id: {notification.AppId}");
-            Console.WriteLine($"Windows notification id: {notification.WindowsNotificationId}");
-            Console.WriteLine($"Timestamp: {notification.CreationTime.ToLocalTime():yyyy-MM-dd HH:mm:ss.fff zzz}");
-            Console.WriteLine("Title:");
-            Console.WriteLine(Indent(notification.Title));
-            Console.WriteLine("Body/message:");
-            Console.WriteLine(Indent(notification.Body));
-            Console.WriteLine("Raw text elements:");
-
-            if (notification.RawTextElements.Count == 0)
+            foreach (var line in NotificationTerminalFormatter.FormatNotification(notification, debugRaw))
             {
-                Console.WriteLine("  <none>");
+                Console.WriteLine(line);
             }
-            else
-            {
-                for (var index = 0; index < notification.RawTextElements.Count; index++)
-                {
-                    Console.WriteLine($"  [{index}] {OneLine(notification.RawTextElements[index])}");
-                }
-            }
-
-            Console.WriteLine();
         }
     }
 
@@ -401,21 +388,22 @@ internal static class Program
         }
     }
 
-    private static string Indent(string value)
+    private static void ConfigureConsoleEncoding()
     {
-        if (string.IsNullOrEmpty(value))
+        try
         {
-            return "  <empty>";
+            Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+            Console.InputEncoding = Encoding.UTF8;
         }
-
-        return "  " + value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\n", "\n  ", StringComparison.Ordinal);
-    }
-
-    private static string OneLine(string value)
-    {
-        return string.IsNullOrEmpty(value)
-            ? "<empty>"
-            : value.Replace("\r\n", "\\n", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal);
+        catch (IOException)
+        {
+        }
+        catch (SecurityException)
+        {
+        }
+        catch (ArgumentException)
+        {
+        }
     }
 
     private static string FormatInterval(TimeSpan interval)
@@ -443,7 +431,7 @@ internal static class Program
         Console.WriteLine("  NotificationInspector.exe --list-sources");
         Console.WriteLine("  NotificationInspector.exe --enable-source <app-id>");
         Console.WriteLine("  NotificationInspector.exe --disable-source <app-id>");
-        Console.WriteLine("  NotificationInspector.exe --listen [--print-content] [--poll-interval <seconds>]");
+        Console.WriteLine("  NotificationInspector.exe --listen [--print-content] [--debug-raw] [--poll-interval <seconds>]");
         Console.WriteLine();
         Console.WriteLine("Options:");
         Console.WriteLine("  --check-access             Print current UserNotificationListener access and exit.");
@@ -452,7 +440,8 @@ internal static class Program
         Console.WriteLine("  --enable-source <app-id>   Enable storage for a discovered source.");
         Console.WriteLine("  --disable-source <app-id>  Disable storage for a discovered source.");
         Console.WriteLine("  --listen                   Poll visible toast notifications and store enabled-source toasts.");
-        Console.WriteLine("  --print-content            Print enabled-source notification contents to the terminal.");
+        Console.WriteLine("  --print-content            Print concise enabled-source notification contents to the terminal.");
+        Console.WriteLine("  --debug-raw                With --print-content, include raw fields and Unicode diagnostics.");
         Console.WriteLine("  --poll-interval <seconds>  Polling interval. Defaults to 1.");
         Console.WriteLine("  --help                     Show this help.");
     }
@@ -462,6 +451,7 @@ internal static class Program
         bool RequestAccess,
         bool Listen,
         bool PrintContent,
+        bool DebugRaw,
         bool ListSources,
         string? EnableSourceAppId,
         string? DisableSourceAppId,
@@ -475,6 +465,7 @@ internal static class Program
                 RequestAccess: false,
                 Listen: false,
                 PrintContent: false,
+                DebugRaw: false,
                 ListSources: false,
                 EnableSourceAppId: null,
                 DisableSourceAppId: null,
@@ -490,6 +481,7 @@ internal static class Program
             var requestAccess = false;
             var listen = false;
             var printContent = false;
+            var debugRaw = false;
             var listSources = false;
             string? enableSourceAppId = null;
             string? disableSourceAppId = null;
@@ -531,6 +523,9 @@ internal static class Program
                     case "--print-content":
                         printContent = true;
                         break;
+                    case "--debug-raw":
+                        debugRaw = true;
+                        break;
                     case "--poll-interval":
                         if (index + 1 >= args.Count)
                         {
@@ -564,12 +559,18 @@ internal static class Program
                 return new OptionsParseResult(defaultOptions, "Use only one source command at a time.");
             }
 
+            if (debugRaw && !printContent)
+            {
+                return new OptionsParseResult(defaultOptions, "--debug-raw requires --print-content.");
+            }
+
             return new OptionsParseResult(
                 new Options(
                     checkAccess,
                     requestAccess,
                     listen,
                     printContent,
+                    debugRaw,
                     listSources,
                     enableSourceAppId,
                     disableSourceAppId,
