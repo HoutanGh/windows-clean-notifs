@@ -64,7 +64,13 @@ internal static class Program
             ("frontend spa fallback serves index", FrontendSpaFallbackServesIndex),
             ("frontend serving preserves api routes", FrontendServingPreservesApiRoutes),
             ("frontend does not serve repository files", FrontendDoesNotServeRepositoryFiles),
-            ("frontend missing assets message", FrontendMissingAssetsMessage)
+            ("frontend missing assets message", FrontendMissingAssetsMessage),
+            ("open-browser option parsing", OpenBrowserOptionParsing),
+            ("open-browser is not default", OpenBrowserIsNotDefault),
+            ("open-browser requires serve", OpenBrowserRequiresServe),
+            ("browser opener opens only once", BrowserOpenerOpensOnlyOnce),
+            ("browser launch failure warns only", BrowserLaunchFailureWarnsOnly),
+            ("port conflict message is actionable", PortConflictMessageIsActionable)
         };
 
         var failures = 0;
@@ -1035,6 +1041,86 @@ internal static class Program
         AssertContains("Frontend assets have not been built.", body);
     }
 
+    private static Task OpenBrowserOptionParsing()
+    {
+        var parseResult = WindowsCleanNotifs.NotificationInspector.Program.Options.Parse(
+            ["--serve", "--open-browser", "--port", "4900"]);
+
+        AssertNull(parseResult.Error);
+        AssertEqual(true, parseResult.Options.Serve);
+        AssertEqual(true, parseResult.Options.OpenBrowser);
+        AssertEqual(4900, parseResult.Options.Port);
+        return Task.CompletedTask;
+    }
+
+    private static Task OpenBrowserIsNotDefault()
+    {
+        var parseResult = WindowsCleanNotifs.NotificationInspector.Program.Options.Parse(["--serve"]);
+
+        AssertNull(parseResult.Error);
+        AssertEqual(true, parseResult.Options.Serve);
+        AssertEqual(false, parseResult.Options.OpenBrowser);
+        return Task.CompletedTask;
+    }
+
+    private static Task OpenBrowserRequiresServe()
+    {
+        var parseResult = WindowsCleanNotifs.NotificationInspector.Program.Options.Parse(["--open-browser"]);
+
+        AssertEqual("--open-browser requires --serve.", parseResult.Error);
+        return Task.CompletedTask;
+    }
+
+    private static Task BrowserOpenerOpensOnlyOnce()
+    {
+        var launcher = new RecordingDashboardBrowserLauncher();
+        using var error = new StringWriter(CultureInfo.InvariantCulture);
+        var opener = new DashboardBrowserOpener(launcher, error);
+        var dashboardUri = WindowsCleanNotifs.NotificationInspector.Program.GetDashboardUri(4827);
+
+        opener.OpenAfterServerStarted(enabled: false, dashboardUri);
+        opener.OpenAfterServerStarted(enabled: true, dashboardUri);
+        opener.OpenAfterServerStarted(enabled: true, dashboardUri);
+
+        AssertEqual(1, launcher.OpenedUris.Count);
+        AssertEqual(dashboardUri, launcher.OpenedUris[0]);
+        AssertEqual(string.Empty, error.ToString());
+        return Task.CompletedTask;
+    }
+
+    private static Task BrowserLaunchFailureWarnsOnly()
+    {
+        var launcher = new RecordingDashboardBrowserLauncher
+        {
+            ExceptionToThrow = new InvalidOperationException("browser blocked")
+        };
+        using var error = new StringWriter(CultureInfo.InvariantCulture);
+        var opener = new DashboardBrowserOpener(launcher, error);
+
+        opener.OpenAfterServerStarted(
+            enabled: true,
+            WindowsCleanNotifs.NotificationInspector.Program.GetDashboardUri(4827));
+
+        AssertContains("Warning: could not open dashboard browser: browser blocked", error.ToString());
+        AssertEqual(1, launcher.OpenedUris.Count);
+        return Task.CompletedTask;
+    }
+
+    private static Task PortConflictMessageIsActionable()
+    {
+        var message = string.Join(
+            '\n',
+            WindowsCleanNotifs.NotificationInspector.Program.FormatPortConflictMessage(
+                4827,
+                "address already in use"));
+
+        AssertContains("http://127.0.0.1:4827/", message);
+        AssertContains("Port 4827 may already be in use.", message);
+        AssertContains(".\\notifs.cmd --port 4900", message);
+        AssertContains("address already in use", message);
+        return Task.CompletedTask;
+    }
+
     private static PollingNotificationCollector NewCollector(
         INotificationSnapshotProvider provider,
         FakeClock? clock = null)
@@ -1360,6 +1446,22 @@ internal static class Program
         public void Advance(TimeSpan amount)
         {
             _current += amount;
+        }
+    }
+
+    private sealed class RecordingDashboardBrowserLauncher : IDashboardBrowserLauncher
+    {
+        public List<Uri> OpenedUris { get; } = [];
+
+        public Exception? ExceptionToThrow { get; init; }
+
+        public void Open(Uri dashboardUri)
+        {
+            OpenedUris.Add(dashboardUri);
+            if (ExceptionToThrow is not null)
+            {
+                throw ExceptionToThrow;
+            }
         }
     }
 
