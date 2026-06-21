@@ -13,7 +13,17 @@ internal static class Program
             ("multiple notifications from one app", MultipleNotificationsFromOneAppEmitOncePerNotification),
             ("multiple applications", MultipleApplicationsDiscoverSeparateSources),
             ("notifications disappearing from later snapshots", DisappearingNotificationsStayDedupedWithinRetention),
-            ("bounded dedupe retention", StaleIdentitiesArePruned)
+            ("bounded dedupe retention", StaleIdentitiesArePruned),
+            ("new sources default disabled", NewlyDiscoveredSourcesDefaultToDisabled),
+            ("source metadata survives reopening", SourceMetadataSurvivesReopeningDatabase),
+            ("source selection persists", EnablingAndDisablingSourcePersists),
+            ("rediscovery preserves selection", RediscoveryUpdatesMetadataWithoutResettingSelection),
+            ("disabled source content is not stored", DisabledSourceNotificationContentIsNotStored),
+            ("enabled source content is stored", EnabledSourceNotificationContentIsStored),
+            ("duplicate notifications are ignored", DuplicateNotificationsAreNotInsertedTwice),
+            ("raw text round trips", RawTextElementsRoundTripInOrder),
+            ("startup notifications are not stored", StartupSnapshotNotificationsAreNotStored),
+            ("retention preserves sources", RetentionRemovesOldNotificationsButPreservesSources)
         };
 
         var failures = 0;
@@ -163,6 +173,271 @@ internal static class Program
         AssertEqual(1, reappearedPoll.NewNotifications.Count);
     }
 
+    private static async Task NewlyDiscoveredSourcesDefaultToDisabled()
+    {
+        var testDb = TestDatabase.Create();
+        try
+        {
+            var store = await testDb.OpenStoreAsync();
+            var coordinator = new NotificationStorageCoordinator(store);
+            var result = SnapshotResult(
+                observedAt: "2026-06-21T11:00:00+01:00",
+                seenSources: [new NotificationSource("App One", "app.one")]);
+
+            var persisted = await coordinator.ApplyAsync(result, storeNewNotifications: false, CancellationToken.None);
+            var source = AssertNotNull(await store.GetSourceAsync("app.one", CancellationToken.None));
+
+            AssertEqual(1, persisted.DiscoveredSources.Count);
+            AssertEqual(false, source.Enabled);
+        }
+        finally
+        {
+            testDb.Delete();
+        }
+    }
+
+    private static async Task SourceMetadataSurvivesReopeningDatabase()
+    {
+        var testDb = TestDatabase.Create();
+        try
+        {
+            var firstStore = await testDb.OpenStoreAsync();
+            await firstStore.UpsertSourceAsync(
+                new NotificationSource("App One", "app.one"),
+                DateTimeOffset.Parse("2026-06-21T11:01:00+01:00"),
+                CancellationToken.None);
+
+            var secondStore = await testDb.OpenStoreAsync();
+            var source = AssertNotNull(await secondStore.GetSourceAsync("app.one", CancellationToken.None));
+
+            AssertEqual("App One", source.AppDisplayName);
+            AssertEqual(false, source.Enabled);
+        }
+        finally
+        {
+            testDb.Delete();
+        }
+    }
+
+    private static async Task EnablingAndDisablingSourcePersists()
+    {
+        var testDb = TestDatabase.Create();
+        try
+        {
+            var firstStore = await testDb.OpenStoreAsync();
+            await firstStore.UpsertSourceAsync(
+                new NotificationSource("App One", "app.one"),
+                DateTimeOffset.Parse("2026-06-21T11:02:00+01:00"),
+                CancellationToken.None);
+
+            AssertEqual(true, await firstStore.SetSourceEnabledAsync("app.one", true, CancellationToken.None));
+
+            var secondStore = await testDb.OpenStoreAsync();
+            var enabledSource = AssertNotNull(await secondStore.GetSourceAsync("app.one", CancellationToken.None));
+            AssertEqual(true, enabledSource.Enabled);
+
+            AssertEqual(true, await secondStore.SetSourceEnabledAsync("app.one", false, CancellationToken.None));
+
+            var thirdStore = await testDb.OpenStoreAsync();
+            var disabledSource = AssertNotNull(await thirdStore.GetSourceAsync("app.one", CancellationToken.None));
+            AssertEqual(false, disabledSource.Enabled);
+        }
+        finally
+        {
+            testDb.Delete();
+        }
+    }
+
+    private static async Task RediscoveryUpdatesMetadataWithoutResettingSelection()
+    {
+        var testDb = TestDatabase.Create();
+        try
+        {
+            var store = await testDb.OpenStoreAsync();
+            var firstSeen = DateTimeOffset.Parse("2026-06-21T11:03:00+01:00");
+            var lastSeen = DateTimeOffset.Parse("2026-06-21T11:04:00+01:00");
+
+            await store.UpsertSourceAsync(new NotificationSource("Old Name", "app.one"), firstSeen, CancellationToken.None);
+            await store.SetSourceEnabledAsync("app.one", true, CancellationToken.None);
+            await store.UpsertSourceAsync(new NotificationSource("New Name", "app.one"), lastSeen, CancellationToken.None);
+
+            var source = AssertNotNull(await store.GetSourceAsync("app.one", CancellationToken.None));
+            AssertEqual("New Name", source.AppDisplayName);
+            AssertEqual(true, source.Enabled);
+            AssertEqual(firstSeen.ToUniversalTime(), source.FirstSeenAt.ToUniversalTime());
+            AssertEqual(lastSeen.ToUniversalTime(), source.LastSeenAt.ToUniversalTime());
+        }
+        finally
+        {
+            testDb.Delete();
+        }
+    }
+
+    private static async Task DisabledSourceNotificationContentIsNotStored()
+    {
+        var testDb = TestDatabase.Create();
+        try
+        {
+            var store = await testDb.OpenStoreAsync();
+            await store.UpsertSourceAsync(
+                new NotificationSource("App One", "app.one"),
+                DateTimeOffset.Parse("2026-06-21T11:05:00+01:00"),
+                CancellationToken.None);
+
+            var insert = await store.TryInsertNotificationAsync(
+                Notification("App One", "app.one", 60, "2026-06-21T11:05:01+01:00"),
+                DateTimeOffset.Parse("2026-06-21T11:05:02+01:00"),
+                CancellationToken.None);
+
+            var notifications = await store.ListNotificationsAsync(CancellationToken.None);
+            AssertEqual(NotificationInsertStatus.SourceDisabled, insert.Status);
+            AssertEqual(0, notifications.Count);
+        }
+        finally
+        {
+            testDb.Delete();
+        }
+    }
+
+    private static async Task EnabledSourceNotificationContentIsStored()
+    {
+        var testDb = TestDatabase.Create();
+        try
+        {
+            var store = await testDb.OpenStoreAsync();
+            await store.UpsertSourceAsync(
+                new NotificationSource("App One", "app.one"),
+                DateTimeOffset.Parse("2026-06-21T11:06:00+01:00"),
+                CancellationToken.None);
+            await store.SetSourceEnabledAsync("app.one", true, CancellationToken.None);
+
+            var notification = Notification(
+                "App One",
+                "app.one",
+                61,
+                "2026-06-21T11:06:01+01:00",
+                ["Title 61", "Line one", "Line two"]);
+            var insert = await store.TryInsertNotificationAsync(
+                notification,
+                DateTimeOffset.Parse("2026-06-21T11:06:02+01:00"),
+                CancellationToken.None);
+
+            var notifications = await store.ListNotificationsAsync(CancellationToken.None);
+            AssertEqual(NotificationInsertStatus.Stored, insert.Status);
+            AssertEqual(1, notifications.Count);
+            AssertEqual("Title 61", notifications[0].Title);
+            AssertEqual($"Line one{Environment.NewLine}Line two", notifications[0].Body);
+        }
+        finally
+        {
+            testDb.Delete();
+        }
+    }
+
+    private static async Task DuplicateNotificationsAreNotInsertedTwice()
+    {
+        var testDb = TestDatabase.Create();
+        try
+        {
+            var store = await EnabledStoreAsync(testDb, "App One", "app.one", "2026-06-21T11:07:00+01:00");
+            var notification = Notification("App One", "app.one", 62, "2026-06-21T11:07:01+01:00");
+            var capturedAt = DateTimeOffset.Parse("2026-06-21T11:07:02+01:00");
+
+            var first = await store.TryInsertNotificationAsync(notification, capturedAt, CancellationToken.None);
+            var second = await store.TryInsertNotificationAsync(notification, capturedAt, CancellationToken.None);
+            var notifications = await store.ListNotificationsAsync(CancellationToken.None);
+
+            AssertEqual(NotificationInsertStatus.Stored, first.Status);
+            AssertEqual(NotificationInsertStatus.Duplicate, second.Status);
+            AssertEqual(1, notifications.Count);
+        }
+        finally
+        {
+            testDb.Delete();
+        }
+    }
+
+    private static async Task RawTextElementsRoundTripInOrder()
+    {
+        var testDb = TestDatabase.Create();
+        try
+        {
+            var store = await EnabledStoreAsync(testDb, "App One", "app.one", "2026-06-21T11:08:00+01:00");
+            var rawText = new[] { "First", "Second", "Third" };
+            var notification = Notification("App One", "app.one", 63, "2026-06-21T11:08:01+01:00", rawText);
+
+            await store.TryInsertNotificationAsync(
+                notification,
+                DateTimeOffset.Parse("2026-06-21T11:08:02+01:00"),
+                CancellationToken.None);
+
+            var stored = (await store.ListNotificationsAsync(CancellationToken.None))[0];
+            AssertSequenceEqual(rawText, stored.RawTextElements);
+        }
+        finally
+        {
+            testDb.Delete();
+        }
+    }
+
+    private static async Task StartupSnapshotNotificationsAreNotStored()
+    {
+        var testDb = TestDatabase.Create();
+        try
+        {
+            var store = await testDb.OpenStoreAsync();
+            var notification = Notification("App One", "app.one", 64, "2026-06-21T11:09:01+01:00");
+            var provider = new FakeSnapshotProvider([notification]);
+            var clock = new FakeClock(DateTimeOffset.Parse("2026-06-21T11:09:02+01:00"));
+            var collector = NewCollector(provider, clock);
+            var coordinator = new NotificationStorageCoordinator(store);
+
+            var startup = await collector.SeedAsync(CancellationToken.None);
+            await coordinator.ApplyAsync(startup, storeNewNotifications: false, CancellationToken.None);
+
+            var source = await store.GetSourceAsync("app.one", CancellationToken.None);
+            var notifications = await store.ListNotificationsAsync(CancellationToken.None);
+            AssertNotNull(source);
+            AssertEqual(0, notifications.Count);
+        }
+        finally
+        {
+            testDb.Delete();
+        }
+    }
+
+    private static async Task RetentionRemovesOldNotificationsButPreservesSources()
+    {
+        var testDb = TestDatabase.Create();
+        try
+        {
+            var store = await EnabledStoreAsync(testDb, "App One", "app.one", "2026-06-21T11:10:00+01:00");
+            await store.TryInsertNotificationAsync(
+                Notification("App One", "app.one", 65, "2026-06-18T10:00:00+01:00"),
+                DateTimeOffset.Parse("2026-06-18T10:00:00+01:00"),
+                CancellationToken.None);
+            await store.TryInsertNotificationAsync(
+                Notification("App One", "app.one", 66, "2026-06-21T11:10:01+01:00"),
+                DateTimeOffset.Parse("2026-06-21T11:10:01+01:00"),
+                CancellationToken.None);
+
+            var deleted = await store.DeleteNotificationsOlderThanAsync(
+                DateTimeOffset.Parse("2026-06-21T11:10:00+01:00") - TimeSpan.FromHours(72),
+                CancellationToken.None);
+            var notifications = await store.ListNotificationsAsync(CancellationToken.None);
+            var sources = await store.ListSourcesAsync(CancellationToken.None);
+
+            AssertEqual(1, deleted);
+            AssertEqual(1, notifications.Count);
+            AssertEqual(1, sources.Count);
+            AssertEqual("app.one", sources[0].AppId);
+        }
+        finally
+        {
+            testDb.Delete();
+        }
+    }
+
     private static PollingNotificationCollector NewCollector(
         INotificationSnapshotProvider provider,
         FakeClock? clock = null)
@@ -177,16 +452,47 @@ internal static class Program
         string appDisplayName,
         string appId,
         uint windowsNotificationId,
-        string creationTime)
+        string creationTime,
+        IReadOnlyList<string>? rawTextElements = null)
     {
+        var rawText = rawTextElements ?? [$"Title {windowsNotificationId}", $"Body {windowsNotificationId}"];
+
         return new CapturedNotification(
             AppDisplayName: appDisplayName,
             AppId: appId,
             WindowsNotificationId: windowsNotificationId,
             CreationTime: DateTimeOffset.Parse(creationTime),
-            Title: $"Title {windowsNotificationId}",
-            Body: $"Body {windowsNotificationId}",
-            RawTextElements: [$"Title {windowsNotificationId}", $"Body {windowsNotificationId}"]);
+            Title: rawText.FirstOrDefault() ?? string.Empty,
+            Body: rawText.Count > 1 ? string.Join(Environment.NewLine, rawText.Skip(1)) : string.Empty,
+            RawTextElements: rawText);
+    }
+
+    private static CollectorSnapshotResult SnapshotResult(
+        string observedAt,
+        IReadOnlyList<NotificationSource>? seenSources = null,
+        IReadOnlyList<CapturedNotification>? newNotifications = null)
+    {
+        return new CollectorSnapshotResult(
+            ObservedAt: DateTimeOffset.Parse(observedAt),
+            SnapshotCount: newNotifications?.Count ?? seenSources?.Count ?? 0,
+            SeenSources: seenSources ?? [],
+            DiscoveredSources: [],
+            NewNotifications: newNotifications ?? []);
+    }
+
+    private static async Task<SqliteNotificationStore> EnabledStoreAsync(
+        TestDatabase testDb,
+        string appDisplayName,
+        string appId,
+        string seenAt)
+    {
+        var store = await testDb.OpenStoreAsync();
+        await store.UpsertSourceAsync(
+            new NotificationSource(appDisplayName, appId),
+            DateTimeOffset.Parse(seenAt),
+            CancellationToken.None);
+        await store.SetSourceEnabledAsync(appId, true, CancellationToken.None);
+        return store;
     }
 
     private static void AssertEqual<T>(T expected, T actual)
@@ -194,6 +500,25 @@ internal static class Program
         if (!EqualityComparer<T>.Default.Equals(expected, actual))
         {
             throw new InvalidOperationException($"Expected {expected}, got {actual}.");
+        }
+    }
+
+    private static T AssertNotNull<T>(T? value)
+    {
+        if (value is null)
+        {
+            throw new InvalidOperationException("Expected value not to be null.");
+        }
+
+        return value;
+    }
+
+    private static void AssertSequenceEqual<T>(IReadOnlyList<T> expected, IReadOnlyList<T> actual)
+    {
+        AssertEqual(expected.Count, actual.Count);
+        for (var index = 0; index < expected.Count; index++)
+        {
+            AssertEqual(expected[index], actual[index]);
         }
     }
 
@@ -230,6 +555,45 @@ internal static class Program
         public void Advance(TimeSpan amount)
         {
             _current += amount;
+        }
+    }
+
+    private sealed class TestDatabase
+    {
+        private readonly string _directory;
+
+        private TestDatabase(string directory, string path)
+        {
+            _directory = directory;
+            Path = path;
+        }
+
+        public string Path { get; }
+
+        public static TestDatabase Create()
+        {
+            var directory = System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(),
+                "windows-clean-notifs-tests",
+                Guid.NewGuid().ToString("N"));
+            var path = System.IO.Path.Combine(directory, "notifications.db");
+
+            return new TestDatabase(directory, path);
+        }
+
+        public async Task<SqliteNotificationStore> OpenStoreAsync()
+        {
+            var store = new SqliteNotificationStore(Path);
+            await store.InitializeAsync(CancellationToken.None);
+            return store;
+        }
+
+        public void Delete()
+        {
+            if (Directory.Exists(_directory))
+            {
+                Directory.Delete(_directory, recursive: true);
+            }
         }
     }
 }
