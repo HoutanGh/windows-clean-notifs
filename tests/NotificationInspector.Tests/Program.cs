@@ -57,8 +57,14 @@ internal static class Program
             ("api excludes raw diagnostic fields", ApiRawDiagnosticFieldsAreNotExposed),
             ("sse streams stored notification once", SseStoredNotificationReachesSubscriberOnce),
             ("sse afterId replay returns newer notifications", SseAfterIdReplayReturnsOnlyNewerNotifications),
+            ("sse Last-Event-ID replay returns newer notifications", SseLastEventIdReplayReturnsOnlyNewerNotifications),
             ("sse excludes disabled-source notifications", SseDisabledSourceNotificationsAreNotStreamed),
-            ("sse cancellation cleans subscriber", SseCancellationCleansSubscriber)
+            ("sse cancellation cleans subscriber", SseCancellationCleansSubscriber),
+            ("frontend root serves compiled index", FrontendRootServesCompiledIndex),
+            ("frontend spa fallback serves index", FrontendSpaFallbackServesIndex),
+            ("frontend serving preserves api routes", FrontendServingPreservesApiRoutes),
+            ("frontend does not serve repository files", FrontendDoesNotServeRepositoryFiles),
+            ("frontend missing assets message", FrontendMissingAssetsMessage)
         };
 
         var failures = 0;
@@ -914,6 +920,26 @@ internal static class Program
         AssertEqual(third.Id, replayThird.Id);
     }
 
+    private static async Task SseLastEventIdReplayReturnsOnlyNewerNotifications()
+    {
+        await using var host = await ApiTestHost.CreateAsync();
+        await AddSourceAsync(host.Store, "App One", "app.one", enabled: true, "2026-06-21T12:09:10+01:00");
+        var first = await InsertNotificationAsync(host.Store, "App One", "app.one", 264, "2026-06-21T12:09:11+01:00");
+        var second = await InsertNotificationAsync(host.Store, "App One", "app.one", 265, "2026-06-21T12:09:12+01:00");
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/events");
+        request.Headers.Add("Last-Event-ID", first.Id.ToString(CultureInfo.InvariantCulture));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var response = await host.Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        await using var stream = await response.Content.ReadAsStreamAsync(cts.Token);
+        var reader = new SseReader(stream);
+
+        var replaySecond = await reader.ReadNextNotificationAsync(cts.Token);
+
+        AssertEqual(second.Id, replaySecond.Id);
+    }
+
     private static async Task SseDisabledSourceNotificationsAreNotStreamed()
     {
         await using var host = await ApiTestHost.CreateAsync();
@@ -946,6 +972,67 @@ internal static class Program
 
         using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         await WaitForSubscriberCountAsync(host.Hub, 0, cleanupCts.Token);
+    }
+
+    private static async Task FrontendRootServesCompiledIndex()
+    {
+        using var frontend = TestFrontendAssets.Create();
+        await using var host = await ApiTestHost.CreateAsync(frontend.DirectoryPath);
+
+        var response = await host.Client.GetAsync("/");
+        var body = await response.Content.ReadAsStringAsync();
+
+        AssertEqual(HttpStatusCode.OK, response.StatusCode);
+        AssertContains("dashboard-root-marker", body);
+        AssertEqual("text/html", response.Content.Headers.ContentType?.MediaType);
+    }
+
+    private static async Task FrontendServingPreservesApiRoutes()
+    {
+        using var frontend = TestFrontendAssets.Create();
+        await using var host = await ApiTestHost.CreateAsync(frontend.DirectoryPath);
+
+        var response = await host.Client.GetAsync("/api/health");
+        var json = await ReadJsonObjectAsync(response);
+
+        AssertEqual(HttpStatusCode.OK, response.StatusCode);
+        AssertEqual("ok", json.RootElement.GetProperty("status").GetString());
+    }
+
+    private static async Task FrontendSpaFallbackServesIndex()
+    {
+        using var frontend = TestFrontendAssets.Create();
+        await using var host = await ApiTestHost.CreateAsync(frontend.DirectoryPath);
+
+        var response = await host.Client.GetAsync("/sources");
+        var body = await response.Content.ReadAsStringAsync();
+
+        AssertEqual(HttpStatusCode.OK, response.StatusCode);
+        AssertContains("dashboard-root-marker", body);
+    }
+
+    private static async Task FrontendDoesNotServeRepositoryFiles()
+    {
+        using var frontend = TestFrontendAssets.Create();
+        await using var host = await ApiTestHost.CreateAsync(frontend.DirectoryPath);
+
+        var response = await host.Client.GetAsync("/AGENTS.md");
+        var body = await response.Content.ReadAsStringAsync();
+
+        AssertEqual(HttpStatusCode.NotFound, response.StatusCode);
+        AssertDoesNotContain("Required response format", body);
+    }
+
+    private static async Task FrontendMissingAssetsMessage()
+    {
+        var missingAssetsPath = Path.Combine(Path.GetTempPath(), "missing-dashboard-assets-" + Guid.NewGuid().ToString("N"));
+        await using var host = await ApiTestHost.CreateAsync(missingAssetsPath);
+
+        var response = await host.Client.GetAsync("/");
+        var body = await response.Content.ReadAsStringAsync();
+
+        AssertEqual(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        AssertContains("Frontend assets have not been built.", body);
     }
 
     private static PollingNotificationCollector NewCollector(
@@ -1301,7 +1388,7 @@ internal static class Program
 
         public NotificationEventHub Hub { get; }
 
-        public static async Task<ApiTestHost> CreateAsync()
+        public static async Task<ApiTestHost> CreateAsync(string? frontendAssetsPath = null)
         {
             var testDb = TestDatabase.Create();
             var store = await testDb.OpenStoreAsync();
@@ -1313,16 +1400,25 @@ internal static class Program
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions
             {
                 Args = [],
-                EnvironmentName = "Production"
+                EnvironmentName = "Production",
+                ContentRootPath = System.IO.Path.GetTempPath()
             });
             builder.WebHost.UseTestServer();
             builder.Logging.ClearProviders();
+            var resolvedFrontendAssetsPath = frontendAssetsPath
+                ?? System.IO.Path.Combine(
+                    System.IO.Path.GetTempPath(),
+                    "missing-notification-dashboard-assets-" + Guid.NewGuid().ToString("N"));
+
             NotificationApi.ConfigureServices(
                 builder.Services,
                 store,
                 hub,
                 state,
-                new NotificationApiOptions(TimeSpan.FromSeconds(1), TimeSpan.FromHours(72)));
+                new NotificationApiOptions(
+                    TimeSpan.FromSeconds(1),
+                    TimeSpan.FromHours(72),
+                    resolvedFrontendAssetsPath));
 
             var app = builder.Build();
             NotificationApi.MapEndpoints(app);
@@ -1342,6 +1438,46 @@ internal static class Program
             await _app.StopAsync();
             await _app.DisposeAsync();
             _testDb.Delete();
+        }
+    }
+
+    private sealed class TestFrontendAssets : IDisposable
+    {
+        private TestFrontendAssets(string directoryPath)
+        {
+            DirectoryPath = directoryPath;
+        }
+
+        public string DirectoryPath { get; }
+
+        public static TestFrontendAssets Create()
+        {
+            var directoryPath = Path.Combine(
+                Path.GetTempPath(),
+                "notification-dashboard-assets-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(Path.Combine(directoryPath, "assets"));
+            File.WriteAllText(
+                Path.Combine(directoryPath, "index.html"),
+                """
+                <!doctype html>
+                <html>
+                  <body>
+                    <div id="root">dashboard-root-marker</div>
+                    <script type="module" src="/assets/index.js"></script>
+                  </body>
+                </html>
+                """);
+            File.WriteAllText(Path.Combine(directoryPath, "assets", "index.js"), "console.log('dashboard asset');");
+
+            return new TestFrontendAssets(directoryPath);
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(DirectoryPath))
+            {
+                Directory.Delete(DirectoryPath, recursive: true);
+            }
         }
     }
 
