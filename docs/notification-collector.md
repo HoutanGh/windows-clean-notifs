@@ -56,11 +56,126 @@ Retention cleanup deletes stored notifications older than 72 hours. It runs at s
 - .NET 10 SDK available to Windows PowerShell.
 - Node.js 18 or newer for the React/Vite dashboard build.
 
-The repository can stay in WSL, but the executable must be built and launched by Windows PowerShell. Do not run the collector as a Linux/WSL process.
+The repository can stay in WSL2. This keeps one source checkout and avoids copying the project to `C:`.
+
+The collector still runs as a Windows executable. Do not run the collector as a Linux/WSL process.
+
+## One-Time Launcher Install
+
+Run this once from Windows PowerShell:
+
+```powershell
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\scripts\install-launchers.ps1"
+```
+
+The installer resolves the repository path from its own script location and creates:
+
+```text
+%USERPROFILE%\notifs.cmd
+%USERPROFILE%\build-notifs.cmd
+```
+
+It does not modify `PATH`, the PowerShell profile, or the repository location.
+
+If the repository path changes, rerun `scripts\install-launchers.ps1` through the repository's new Windows path.
+
+## Normal Windows Workflow
+
+From Windows PowerShell in the user profile:
+
+```powershell
+cd $env:USERPROFILE
+.\notifs.cmd
+```
+
+This runs the published Windows executable with:
+
+```text
+--serve --open-browser
+```
+
+The terminal stays attached. Press `Ctrl+C` in that terminal to stop the collector and server together.
+
+The default dashboard URL is:
+
+```text
+http://127.0.0.1:4827/
+```
+
+Custom port:
+
+```powershell
+.\notifs.cmd --port 4900
+```
+
+Custom polling interval:
+
+```powershell
+.\notifs.cmd --poll-interval 0.5
+```
+
+If `notifs.cmd` says the published executable is missing, run:
+
+```powershell
+.\build-notifs.cmd
+```
+
+## Build After Code Changes
+
+From Windows PowerShell in the user profile:
+
+```powershell
+cd $env:USERPROFILE
+.\build-notifs.cmd
+```
+
+The build launcher invokes:
+
+```text
+scripts\build-dashboard.ps1
+```
+
+When the repository path is a WSL UNC path, the script runs frontend `npm` commands inside that WSL distro and runs the .NET tests/publish with Windows `dotnet.exe`.
+
+That script:
+
+- installs frontend dependencies with `npm ci`;
+- runs frontend tests;
+- builds the Vite frontend;
+- runs the .NET test harness;
+- publishes the Windows application;
+- verifies the executable and compiled frontend assets exist.
+
+Publish output:
+
+```text
+artifacts\notification-inspector-dashboard
+```
+
+Expected runnable executable:
+
+```text
+artifacts\notification-inspector-dashboard\NotificationInspector.exe
+```
+
+Expected frontend assets:
+
+```text
+artifacts\notification-inspector-dashboard\wwwroot\index.html
+artifacts\notification-inspector-dashboard\wwwroot\assets\...
+```
+
+Stop any running `NotificationInspector.exe` before rebuilding over the same output folder, because Windows locks files that are currently executing.
+
+If the build says `NotificationInspector.exe is currently running`, stop the existing app terminal with `Ctrl+C`, then rerun:
+
+```powershell
+.\build-notifs.cmd
+```
 
 ## Frontend Install And Build
 
-From WSL or another shell in the repository:
+The launcher build is preferred. For frontend-only development, from WSL or another shell in the repository:
 
 ```bash
 cd /home/houtang/GitHub/windows-clean-notifs/src/NotificationDashboard.Web
@@ -74,7 +189,7 @@ npm run build
 src/NotificationDashboard.Web/dist
 ```
 
-The .NET project copies those compiled assets into `wwwroot` during build/publish. Build the frontend before publishing the Windows executable if you want `--serve` to host the browser dashboard.
+The .NET project copies those compiled assets into `wwwroot` during build/publish.
 
 Run frontend tests:
 
@@ -98,27 +213,18 @@ http://127.0.0.1:4827
 
 No broad CORS is enabled.
 
-## Backend Build
+## Direct Backend Build
 
-From Windows PowerShell:
+The launcher build is preferred. For direct debugging from Windows PowerShell:
 
 ```powershell
-dotnet publish "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\src\NotificationInspector\NotificationInspector.csproj" --configuration Debug --runtime win-x64 --self-contained true --output "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling"
+dotnet publish "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\src\NotificationInspector\NotificationInspector.csproj" --configuration Debug --runtime win-x64 --self-contained true --output "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-dashboard"
 ```
 
 This writes the Windows executable to an ignored artifact folder under the WSL repo:
 
 ```text
-\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe
-```
-
-Stop any running `NotificationInspector.exe` before publishing over the same output folder, because Windows locks files that are currently executing.
-
-If the frontend has been built first, the publish output includes:
-
-```text
-wwwroot\index.html
-wwwroot\assets\...
+\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-dashboard\NotificationInspector.exe
 ```
 
 ## Check Or Grant Access
@@ -126,7 +232,7 @@ wwwroot\assets\...
 Check access:
 
 ```powershell
-& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --check-access
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-dashboard\NotificationInspector.exe" --check-access
 ```
 
 Expected shape when access is available:
@@ -141,7 +247,7 @@ Notification listener access is allowed.
 Try the built-in prompt:
 
 ```powershell
-& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --request-access
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-dashboard\NotificationInspector.exe" --request-access
 ```
 
 If Windows does not show a useful prompt, open Settings manually:
@@ -157,19 +263,19 @@ Then re-run `--check-access`. If access is denied or unspecified, the collector 
 List discovered sources:
 
 ```powershell
-& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --list-sources
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-dashboard\NotificationInspector.exe" --list-sources
 ```
 
 Enable a discovered source:
 
 ```powershell
-& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --enable-source "com.squirrel.Discord.Discord"
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-dashboard\NotificationInspector.exe" --enable-source "com.squirrel.Discord.Discord"
 ```
 
 Disable a discovered source:
 
 ```powershell
-& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --disable-source "com.squirrel.Discord.Discord"
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-dashboard\NotificationInspector.exe" --disable-source "com.squirrel.Discord.Discord"
 ```
 
 Use the exact app ID printed by `--list-sources`.
@@ -179,25 +285,25 @@ Use the exact app ID printed by `--list-sources`.
 Default one-second polling without terminal content printing:
 
 ```powershell
-& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --listen
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-dashboard\NotificationInspector.exe" --listen
 ```
 
 Default one-second polling with enabled-source terminal content printing:
 
 ```powershell
-& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --listen --print-content
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-dashboard\NotificationInspector.exe" --listen --print-content
 ```
 
 Include raw fields and Unicode diagnostics for enabled-source notifications:
 
 ```powershell
-& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --listen --print-content --debug-raw
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-dashboard\NotificationInspector.exe" --listen --print-content --debug-raw
 ```
 
 Custom interval, in seconds:
 
 ```powershell
-& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --listen --print-content --poll-interval 0.5
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-dashboard\NotificationInspector.exe" --listen --print-content --poll-interval 0.5
 ```
 
 Expected startup shape:
@@ -246,7 +352,13 @@ Server mode starts the polling collector, local ASP.NET Core API, Server-Sent Ev
 Default server mode:
 
 ```powershell
-& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --serve
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-dashboard\NotificationInspector.exe" --serve
+```
+
+Open the dashboard in the default Windows browser after the server starts:
+
+```powershell
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-dashboard\NotificationInspector.exe" --serve --open-browser
 ```
 
 Expected startup shape:
@@ -266,13 +378,13 @@ Press Ctrl+C to stop.
 Override the port:
 
 ```powershell
-& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --serve --port 4828
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-dashboard\NotificationInspector.exe" --serve --port 4828
 ```
 
 Override the polling interval:
 
 ```powershell
-& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --serve --poll-interval 0.5
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-dashboard\NotificationInspector.exe" --serve --poll-interval 0.5
 ```
 
 Server mode binds only to loopback:
@@ -301,7 +413,13 @@ npm run build
 
 Then publish or run `--serve` again.
 
-If the port is already in use, startup prints a clear port-conflict message and exits.
+If the port is already in use, startup prints a clear port-conflict message and exits with a non-zero status. It does not terminate other processes.
+
+Example recovery:
+
+```powershell
+.\notifs.cmd --port 4900
+```
 
 ## Browser Dashboard Behaviour
 
@@ -530,7 +648,8 @@ The tests cover:
 - notification pagination and enabled-source filtering;
 - API display mapping and raw-field exclusion;
 - SSE live delivery, `afterId` and `Last-Event-ID` replay, disabled-source exclusion, and subscriber cleanup;
-- compiled frontend serving at `/`, SPA fallback, API route preservation, and repository-file non-exposure.
+- compiled frontend serving at `/`, SPA fallback, API route preservation, and repository-file non-exposure;
+- `--open-browser` argument handling, one-shot browser opening, non-fatal browser launch failure, and actionable occupied-port messaging.
 
 Frontend tests are run separately from the dashboard folder:
 
@@ -543,26 +662,21 @@ They cover initial loading, rendering, missing fields, multiline text, newest-fi
 
 ## Manual Verification
 
-1. Build the frontend with `npm run build`.
-2. Publish the Windows executable with the publish command above.
-3. Run `--check-access` and confirm it prints `Allowed`.
-4. Run `--listen` with no `--print-content`.
-5. Trigger a Discord notification and one notification from another app.
-6. Stop with `Ctrl+C`.
-7. Run `--list-sources` and confirm both apps appear as `Enabled: false`.
-8. Start server mode with `--serve`.
-9. Open `http://127.0.0.1:4827/` and confirm the dashboard loads.
-10. Open Sources.
-11. Enable Discord or another detected source.
-12. Trigger a notification from that enabled source.
-13. Confirm it appears once at the top of the feed without refreshing.
-14. Trigger a multiline or long notification and confirm line breaks and full text are preserved.
-15. Trigger a notification from a disabled source and confirm it does not appear in the feed.
-16. Disable the enabled source and confirm its notifications disappear from the feed.
-17. Restart `--serve` and confirm the source selection persists.
-18. Open `http://127.0.0.1:4827/api/health` and confirm JSON is returned.
-19. Run `curl.exe -N http://127.0.0.1:4827/api/events`.
-20. Trigger an enabled-source notification and confirm one `event: notification` SSE event is printed.
-21. Stop with `Ctrl+C` and confirm shutdown is clean.
+From Windows PowerShell starting in `C:\Users\<user>`:
+
+1. Run `& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\scripts\install-launchers.ps1"` once.
+2. Confirm `%USERPROFILE%\notifs.cmd` and `%USERPROFILE%\build-notifs.cmd` exist.
+3. Run `.\build-notifs.cmd`.
+4. Confirm `artifacts\notification-inspector-dashboard\NotificationInspector.exe` exists.
+5. Confirm `artifacts\notification-inspector-dashboard\wwwroot\index.html` and `wwwroot\assets\...` exist.
+6. Run `.\notifs.cmd`.
+7. Confirm the dashboard opens at `http://127.0.0.1:4827/`.
+8. Open Sources and enable Discord or another detected source.
+9. Trigger an enabled-source notification and confirm it appears once at the top of the feed without refreshing.
+10. Press `Ctrl+C` and confirm the server and collector stop cleanly.
+11. Run `.\notifs.cmd --port 4900` and confirm `http://127.0.0.1:4900/` works.
+12. Run `.\notifs.cmd --poll-interval 0.5` and confirm startup reports the custom interval.
+13. Occupy a port, run `.\notifs.cmd --port <occupied-port>`, and confirm the error is concise and suggests another port.
+14. If the repository path changes, rerun `scripts\install-launchers.ps1` through the repository's new Windows path and confirm the wrappers point to the new location.
 
 Because disabled-source content is intentionally not stored, use the automated tests to verify the SQLite privacy rule directly.
