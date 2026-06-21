@@ -35,7 +35,10 @@ public sealed class NotificationStorageCoordinator
                     collectorResult.ObservedAt,
                     cancellationToken);
 
-                notificationOutcomes.Add(new StoredNotificationOutcome(notification, result.Status));
+                notificationOutcomes.Add(new StoredNotificationOutcome(
+                    notification,
+                    result.Status,
+                    result.Notification));
             }
         }
 

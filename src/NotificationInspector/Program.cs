@@ -1,6 +1,9 @@
 using System.Globalization;
 using System.Security;
 using System.Text;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Logging;
 using Windows.ApplicationModel;
 using Windows.UI.Notifications.Management;
 
@@ -107,7 +110,7 @@ internal static class Program
             Console.WriteLine($"Access status after request: {accessStatus}");
         }
 
-        if (options.CheckAccess || !options.Listen)
+        if (options.CheckAccess || (!options.Listen && !options.Serve))
         {
             PrintAccessAdvice(accessStatus);
             return accessStatus == UserNotificationListenerAccessStatus.Allowed ? 0 : 2;
@@ -117,6 +120,11 @@ internal static class Program
         {
             PrintAccessAdvice(accessStatus);
             return 2;
+        }
+
+        if (options.Serve)
+        {
+            return await RunServerModeAsync(listener, store, accessStatus, options);
         }
 
         Console.WriteLine(options.PrintContent
@@ -154,7 +162,115 @@ internal static class Program
                 options.PollInterval,
                 options.PrintContent,
                 options.DebugRaw,
+                eventHub: null,
+                serverState: null,
                 cts.Token);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+        }
+
+        Console.WriteLine("Stopped.");
+        return 0;
+    }
+
+    private static async Task<int> RunServerModeAsync(
+        UserNotificationListener listener,
+        INotificationStore store,
+        UserNotificationListenerAccessStatus accessStatus,
+        Options options)
+    {
+        var eventHub = new NotificationEventHub();
+        var serverState = new NotificationServerState();
+        serverState.SetListenerAccessStatus(accessStatus.ToString());
+
+        var apiOptions = new NotificationApiOptions(
+            PollInterval: options.PollInterval,
+            RetentionWindow: RetentionWindow);
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            Args = [],
+            EnvironmentName = "Production"
+        });
+        builder.WebHost.UseUrls($"http://127.0.0.1:{options.Port.ToString(CultureInfo.InvariantCulture)}");
+        builder.Logging.ClearProviders();
+        NotificationApi.ConfigureServices(builder.Services, store, eventHub, serverState, apiOptions);
+
+        await using var app = builder.Build();
+        NotificationApi.MapEndpoints(app);
+
+        try
+        {
+            await app.StartAsync(CancellationToken.None);
+        }
+        catch (IOException ex)
+        {
+            Console.Error.WriteLine($"Could not start API on http://127.0.0.1:{options.Port}: {ex.Message}");
+            Console.Error.WriteLine("Another process may already be using that port. Re-run with --port <number>.");
+            return 1;
+        }
+
+        Console.WriteLine(options.PrintContent
+            ? "Content printing is ON for enabled sources because --print-content was supplied."
+            : "Content printing is OFF. Enabled-source notifications will be stored but not printed.");
+        if (options.DebugRaw)
+        {
+            Console.WriteLine("Raw debug printing is ON because --debug-raw was supplied.");
+        }
+
+        Console.WriteLine("Newly discovered sources are disabled by default.");
+        Console.WriteLine($"Polling visible toast notifications every {FormatInterval(options.PollInterval)}.");
+        Console.WriteLine($"Local API: http://127.0.0.1:{options.Port.ToString(CultureInfo.InvariantCulture)}");
+        Console.WriteLine("Press Ctrl+C to stop.");
+        Console.WriteLine();
+
+        using var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, eventArgs) =>
+        {
+            eventArgs.Cancel = true;
+            RequestStop(cts);
+        };
+
+        var provider = new WindowsNotificationSnapshotProvider(listener);
+        var collector = new PollingNotificationCollector(
+            provider,
+            dedupeRetention: TimeSpan.FromMinutes(10));
+        var storageCoordinator = new NotificationStorageCoordinator(store);
+
+        var collectorTask = RunCollectorAsync(
+            collector,
+            storageCoordinator,
+            store,
+            options.PollInterval,
+            options.PrintContent,
+            options.DebugRaw,
+            eventHub,
+            serverState,
+            cts.Token);
+
+        try
+        {
+            var stopTask = Task.Delay(Timeout.InfiniteTimeSpan, cts.Token);
+            var completed = await Task.WhenAny(collectorTask, stopTask);
+            if (completed == collectorTask)
+            {
+                await collectorTask;
+                RequestStop(cts);
+            }
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            RequestStop(cts);
+            using var shutdownCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await app.StopAsync(shutdownCts.Token);
+        }
+
+        try
+        {
+            await collectorTask;
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
@@ -171,37 +287,48 @@ internal static class Program
         TimeSpan pollInterval,
         bool printContent,
         bool debugRaw,
+        NotificationEventHub? eventHub,
+        NotificationServerState? serverState,
         CancellationToken cancellationToken)
     {
-        var nextRetentionCleanup = DateTimeOffset.Now + RetentionCleanupInterval;
-
-        await SeedUntilSuccessfulAsync(collector, storageCoordinator, pollInterval, cancellationToken);
-
-        using var timer = new PeriodicTimer(pollInterval);
-        while (await timer.WaitForNextTickAsync(cancellationToken))
+        serverState?.SetCollectorRunning(true);
+        try
         {
-            try
-            {
-                var result = await collector.PollOnceAsync(cancellationToken);
-                var persisted = await storageCoordinator.ApplyAsync(result, storeNewNotifications: true, cancellationToken);
-                PrintPersistedCollectorResult(persisted, printContent, debugRaw);
+            var nextRetentionCleanup = DateTimeOffset.Now + RetentionCleanupInterval;
 
-                var now = DateTimeOffset.Now;
-                if (now >= nextRetentionCleanup)
+            await SeedUntilSuccessfulAsync(collector, storageCoordinator, pollInterval, cancellationToken);
+
+            using var timer = new PeriodicTimer(pollInterval);
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                try
                 {
-                    await RunRetentionCleanupAsync(store, now, cancellationToken);
-                    nextRetentionCleanup = now + RetentionCleanupInterval;
+                    var result = await collector.PollOnceAsync(cancellationToken);
+                    var persisted = await storageCoordinator.ApplyAsync(result, storeNewNotifications: true, cancellationToken);
+                    PrintPersistedCollectorResult(persisted, printContent, debugRaw);
+                    await PublishStoredNotificationsAsync(store, eventHub, persisted, cancellationToken);
+
+                    var now = DateTimeOffset.Now;
+                    if (now >= nextRetentionCleanup)
+                    {
+                        await RunRetentionCleanupAsync(store, now, cancellationToken);
+                        nextRetentionCleanup = now + RetentionCleanupInterval;
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"Polling/storage failed at {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz}: {ex.GetType().Name}: {ex.Message}");
+                    Console.Error.WriteLine("Will retry on the next poll. Access denial is not treated as an empty notification feed.");
                 }
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Polling/storage failed at {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz}: {ex.GetType().Name}: {ex.Message}");
-                Console.Error.WriteLine("Will retry on the next poll. Access denial is not treated as an empty notification feed.");
-            }
+        }
+        finally
+        {
+            serverState?.SetCollectorRunning(false);
         }
     }
 
@@ -244,6 +371,30 @@ internal static class Program
         if (deleted > 0)
         {
             Console.WriteLine($"Retention cleanup deleted {deleted} stored notification(s) older than {RetentionWindow.TotalHours:0} hours.");
+        }
+    }
+
+    private static async Task PublishStoredNotificationsAsync(
+        INotificationStore store,
+        NotificationEventHub? eventHub,
+        PersistedCollectorResult result,
+        CancellationToken cancellationToken)
+    {
+        if (eventHub is null)
+        {
+            return;
+        }
+
+        foreach (var outcome in result.NotificationOutcomes)
+        {
+            if (outcome.Status == NotificationInsertStatus.Stored && outcome.StoredNotification is not null)
+            {
+                await NotificationPublisher.PublishStoredNotificationAsync(
+                    store,
+                    eventHub,
+                    outcome.StoredNotification,
+                    cancellationToken);
+            }
         }
     }
 
@@ -423,7 +574,7 @@ internal static class Program
 
     private static void PrintUsage()
     {
-        Console.WriteLine("Windows notification collector spike");
+        Console.WriteLine("Windows notification collector");
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  NotificationInspector.exe --check-access");
@@ -432,6 +583,7 @@ internal static class Program
         Console.WriteLine("  NotificationInspector.exe --enable-source <app-id>");
         Console.WriteLine("  NotificationInspector.exe --disable-source <app-id>");
         Console.WriteLine("  NotificationInspector.exe --listen [--print-content] [--debug-raw] [--poll-interval <seconds>]");
+        Console.WriteLine("  NotificationInspector.exe --serve [--print-content] [--debug-raw] [--poll-interval <seconds>] [--port <number>]");
         Console.WriteLine();
         Console.WriteLine("Options:");
         Console.WriteLine("  --check-access             Print current UserNotificationListener access and exit.");
@@ -440,9 +592,11 @@ internal static class Program
         Console.WriteLine("  --enable-source <app-id>   Enable storage for a discovered source.");
         Console.WriteLine("  --disable-source <app-id>  Disable storage for a discovered source.");
         Console.WriteLine("  --listen                   Poll visible toast notifications and store enabled-source toasts.");
+        Console.WriteLine("  --serve                    Poll notifications and expose the loopback HTTP API/SSE server.");
         Console.WriteLine("  --print-content            Print concise enabled-source notification contents to the terminal.");
         Console.WriteLine("  --debug-raw                With --print-content, include raw fields and Unicode diagnostics.");
         Console.WriteLine("  --poll-interval <seconds>  Polling interval. Defaults to 1.");
+        Console.WriteLine("  --port <number>            API port for --serve. Defaults to 4827.");
         Console.WriteLine("  --help                     Show this help.");
     }
 
@@ -450,12 +604,14 @@ internal static class Program
         bool CheckAccess,
         bool RequestAccess,
         bool Listen,
+        bool Serve,
         bool PrintContent,
         bool DebugRaw,
         bool ListSources,
         string? EnableSourceAppId,
         string? DisableSourceAppId,
         TimeSpan PollInterval,
+        int Port,
         bool ShowHelp)
     {
         public static OptionsParseResult Parse(IReadOnlyList<string> args)
@@ -464,12 +620,14 @@ internal static class Program
                 CheckAccess: false,
                 RequestAccess: false,
                 Listen: false,
+                Serve: false,
                 PrintContent: false,
                 DebugRaw: false,
                 ListSources: false,
                 EnableSourceAppId: null,
                 DisableSourceAppId: null,
                 PollInterval: TimeSpan.FromSeconds(1),
+                Port: NotificationApi.DefaultPort,
                 ShowHelp: args.Count == 0);
 
             if (args.Count == 0)
@@ -480,12 +638,14 @@ internal static class Program
             var checkAccess = false;
             var requestAccess = false;
             var listen = false;
+            var serve = false;
             var printContent = false;
             var debugRaw = false;
             var listSources = false;
             string? enableSourceAppId = null;
             string? disableSourceAppId = null;
             var pollInterval = TimeSpan.FromSeconds(1);
+            var port = NotificationApi.DefaultPort;
 
             for (var index = 0; index < args.Count; index++)
             {
@@ -520,6 +680,9 @@ internal static class Program
                     case "--listen":
                         listen = true;
                         break;
+                    case "--serve":
+                        serve = true;
+                        break;
                     case "--print-content":
                         printContent = true;
                         break;
@@ -539,6 +702,21 @@ internal static class Program
                         }
 
                         pollInterval = TimeSpan.FromSeconds(seconds);
+                        break;
+                    case "--port":
+                        if (index + 1 >= args.Count)
+                        {
+                            return new OptionsParseResult(defaultOptions, "--port requires a number.");
+                        }
+
+                        index++;
+                        if (!int.TryParse(args[index], NumberStyles.None, CultureInfo.InvariantCulture, out port)
+                            || port < 1
+                            || port > 65535)
+                        {
+                            return new OptionsParseResult(defaultOptions, "--port must be a number from 1 to 65535.");
+                        }
+
                         break;
                     case "--help":
                     case "-h":
@@ -564,17 +742,24 @@ internal static class Program
                 return new OptionsParseResult(defaultOptions, "--debug-raw requires --print-content.");
             }
 
+            if (listen && serve)
+            {
+                return new OptionsParseResult(defaultOptions, "Use --listen or --serve, not both.");
+            }
+
             return new OptionsParseResult(
                 new Options(
                     checkAccess,
                     requestAccess,
                     listen,
+                    serve,
                     printContent,
                     debugRaw,
                     listSources,
                     enableSourceAppId,
                     disableSourceAppId,
                     pollInterval,
+                    port,
                     ShowHelp: false),
                 null);
         }

@@ -27,6 +27,15 @@ public interface INotificationStore
 
     Task<IReadOnlyList<StoredNotificationRecord>> ListNotificationsAsync(CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<StoredNotificationWithSource>> ListEnabledNotificationsAsync(
+        int limit,
+        long? beforeId,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<StoredNotificationWithSource>> ListEnabledNotificationsAfterIdAsync(
+        long afterId,
+        CancellationToken cancellationToken);
+
     Task<int> DeleteNotificationsOlderThanAsync(
         DateTimeOffset cutoff,
         CancellationToken cancellationToken);

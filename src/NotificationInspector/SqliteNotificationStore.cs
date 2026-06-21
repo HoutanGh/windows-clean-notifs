@@ -228,6 +228,72 @@ public sealed class SqliteNotificationStore : INotificationStore
         return notifications;
     }
 
+    public async Task<IReadOnlyList<StoredNotificationWithSource>> ListEnabledNotificationsAsync(
+        int limit,
+        long? beforeId,
+        CancellationToken cancellationToken)
+    {
+        if (limit <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit), "Limit must be positive.");
+        }
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = beforeId is null
+            ? """
+                SELECT n.id, n.app_id, n.windows_notification_id, n.creation_time, n.title, n.body, n.raw_text_json, n.captured_at,
+                       s.app_id, s.display_name, s.enabled, s.first_seen_at, s.last_seen_at
+                FROM notifications n
+                INNER JOIN sources s ON s.app_id = n.app_id
+                WHERE s.enabled = 1
+                ORDER BY n.id DESC
+                LIMIT $limit;
+                """
+            : """
+                SELECT n.id, n.app_id, n.windows_notification_id, n.creation_time, n.title, n.body, n.raw_text_json, n.captured_at,
+                       s.app_id, s.display_name, s.enabled, s.first_seen_at, s.last_seen_at
+                FROM notifications n
+                INNER JOIN sources s ON s.app_id = n.app_id
+                WHERE s.enabled = 1
+                  AND n.id < $before_id
+                ORDER BY n.id DESC
+                LIMIT $limit;
+                """;
+        command.Parameters.AddWithValue("$limit", limit);
+        if (beforeId is not null)
+        {
+            command.Parameters.AddWithValue("$before_id", beforeId.Value);
+        }
+
+        return await ReadNotificationWithSourcesAsync(command, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<StoredNotificationWithSource>> ListEnabledNotificationsAfterIdAsync(
+        long afterId,
+        CancellationToken cancellationToken)
+    {
+        if (afterId < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(afterId), "Cursor must not be negative.");
+        }
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT n.id, n.app_id, n.windows_notification_id, n.creation_time, n.title, n.body, n.raw_text_json, n.captured_at,
+                   s.app_id, s.display_name, s.enabled, s.first_seen_at, s.last_seen_at
+            FROM notifications n
+            INNER JOIN sources s ON s.app_id = n.app_id
+            WHERE s.enabled = 1
+              AND n.id > $after_id
+            ORDER BY n.id ASC;
+            """;
+        command.Parameters.AddWithValue("$after_id", afterId);
+
+        return await ReadNotificationWithSourcesAsync(command, cancellationToken);
+    }
+
     public async Task<int> DeleteNotificationsOlderThanAsync(
         DateTimeOffset cutoff,
         CancellationToken cancellationToken)
@@ -313,6 +379,20 @@ public sealed class SqliteNotificationStore : INotificationStore
         return ReadNotification(reader);
     }
 
+    private static async Task<IReadOnlyList<StoredNotificationWithSource>> ReadNotificationWithSourcesAsync(
+        SqliteCommand command,
+        CancellationToken cancellationToken)
+    {
+        var notifications = new List<StoredNotificationWithSource>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            notifications.Add(ReadNotificationWithSource(reader));
+        }
+
+        return notifications;
+    }
+
     private static void AddNotificationParameters(
         SqliteCommand command,
         CapturedNotification notification,
@@ -351,6 +431,18 @@ public sealed class SqliteNotificationStore : INotificationStore
             Body: reader.GetString(5),
             RawTextElements: rawText,
             CapturedAt: ParseDateTime(reader.GetString(7)));
+    }
+
+    private static StoredNotificationWithSource ReadNotificationWithSource(SqliteDataReader reader)
+    {
+        return new StoredNotificationWithSource(
+            Notification: ReadNotification(reader),
+            Source: new StoredNotificationSource(
+                AppId: reader.GetString(8),
+                AppDisplayName: reader.GetString(9),
+                Enabled: reader.GetInt64(10) != 0,
+                FirstSeenAt: ParseDateTime(reader.GetString(11)),
+                LastSeenAt: ParseDateTime(reader.GetString(12))));
     }
 
     private static string FormatDateTime(DateTimeOffset value)

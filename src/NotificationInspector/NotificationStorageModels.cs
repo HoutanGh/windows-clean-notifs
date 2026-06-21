@@ -17,6 +17,10 @@ public sealed record StoredNotificationRecord(
     IReadOnlyList<string> RawTextElements,
     DateTimeOffset CapturedAt);
 
+public sealed record StoredNotificationWithSource(
+    StoredNotificationRecord Notification,
+    StoredNotificationSource Source);
+
 public sealed record SourceUpsertResult(
     bool Inserted,
     StoredNotificationSource Source);
@@ -35,7 +39,8 @@ public sealed record NotificationInsertResult(
 
 public sealed record StoredNotificationOutcome(
     CapturedNotification Notification,
-    NotificationInsertStatus Status);
+    NotificationInsertStatus Status,
+    StoredNotificationRecord? StoredNotification);
 
 public sealed record PersistedCollectorResult(
     IReadOnlyList<NotificationSource> DiscoveredSources,
