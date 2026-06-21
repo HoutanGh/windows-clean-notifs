@@ -884,6 +884,14 @@ internal static class Program
 
         AssertEqual(stored.Id, notification.Id);
         AssertEqual("app.one", notification.AppId);
+
+        var second = await InsertNotificationAsync(host.Store, "App One", "app.one", 252, "2026-06-21T12:08:02+01:00");
+        AssertEqual(true, await NotificationPublisher.PublishStoredNotificationAsync(host.Store, host.Hub, second, cts.Token));
+
+        var secondNotification = await reader.ReadNextNotificationAsync(cts.Token);
+
+        AssertEqual(second.Id, secondNotification.Id);
+        AssertEqual("app.one", secondNotification.AppId);
     }
 
     private static async Task SseAfterIdReplayReturnsOnlyNewerNotifications()
