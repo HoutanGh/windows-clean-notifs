@@ -1,8 +1,8 @@
 # Technical Spike: Polling Windows Notification Collector
 
-This is a terminal-only Windows notification collector. It does not include the React UI, HTTP API, storage, source filtering, Discord-specific parsing, MSIX packaging, or AI filtering.
+This is a terminal-only Windows notification collector. It does not include the React UI, HTTP API, SSE, Discord-specific parsing, MSIX packaging, or AI filtering.
 
-The collector prints notification contents only when `--print-content` is supplied. Treat that flag as explicit debug consent because titles, bodies, and raw text elements may contain private information.
+The collector can persist enabled-source notifications to SQLite. Terminal content printing remains opt-in with `--print-content` because titles, bodies, and raw text elements may contain private information.
 
 ## Current Finding
 
@@ -12,13 +12,44 @@ The collector intentionally does not use `UserNotificationListener.NotificationC
 
 Polling is the V1 capture mechanism for this milestone. It can only observe notifications that are still present when a poll runs, so it must not be described as a guaranteed archive of every underlying app event.
 
+## Database
+
+By default, the SQLite database lives in the current Windows user's local application data folder:
+
+```text
+%LOCALAPPDATA%\WindowsCleanNotifs\notifications.db
+```
+
+In PowerShell, that is:
+
+```powershell
+Join-Path $env:LOCALAPPDATA "WindowsCleanNotifs\notifications.db"
+```
+
+The database stores:
+
+- discovered sources, keyed by app ID / AUMID;
+- source display name, enabled status, first seen timestamp, and last seen timestamp;
+- notification content only for enabled sources;
+- raw text elements as JSON, preserving order.
+
+Newly discovered sources are disabled by default. Disabled sources keep source metadata only; notification title, body, and raw text are not stored.
+
+Stored notifications are deduplicated by:
+
+```text
+app ID + Windows notification ID + creation timestamp
+```
+
+Retention cleanup deletes stored notifications older than 72 hours. It runs at startup and periodically while the collector is running. Source records are not deleted by retention cleanup.
+
 ## Prerequisites
 
 - Windows 11.
 - Windows PowerShell.
-- .NET 8 SDK available to Windows PowerShell.
+- .NET SDK available to Windows PowerShell.
 
-The repository can stay in WSL, but the executable must be built and launched by Windows PowerShell. Do not run the listener as a Linux/WSL process.
+The repository can stay in WSL, but the executable must be built and launched by Windows PowerShell. Do not run the collector as a Linux/WSL process.
 
 ## Build
 
@@ -36,7 +67,9 @@ This writes the Windows executable to an ignored artifact folder under the WSL r
 
 Stop any running `NotificationInspector.exe` before publishing over the same output folder, because Windows locks files that are currently executing.
 
-## Check Access
+## Check Or Grant Access
+
+Check access:
 
 ```powershell
 & "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --check-access
@@ -46,13 +79,12 @@ Expected shape when access is available:
 
 ```text
 Package identity: not detected (...). Running unpackaged console collector.
+Database: C:\Users\<you>\AppData\Local\WindowsCleanNotifs\notifications.db
 Access status: Allowed
 Notification listener access is allowed.
 ```
 
-## Grant Access
-
-Try the built-in prompt first:
+Try the built-in prompt:
 
 ```powershell
 & "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --request-access
@@ -66,9 +98,37 @@ start ms-settings:privacy-notifications
 
 Then re-run `--check-access`. If access is denied or unspecified, the collector exits with an actionable message instead of treating the feed as empty.
 
-## Listen And Print
+## Source Commands
 
-Default one-second polling:
+List discovered sources:
+
+```powershell
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --list-sources
+```
+
+Enable a discovered source:
+
+```powershell
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --enable-source "com.squirrel.Discord.Discord"
+```
+
+Disable a discovered source:
+
+```powershell
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --disable-source "com.squirrel.Discord.Discord"
+```
+
+Use the exact app ID printed by `--list-sources`.
+
+## Listen And Store
+
+Default one-second polling without terminal content printing:
+
+```powershell
+& "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --listen
+```
+
+Default one-second polling with enabled-source terminal content printing:
 
 ```powershell
 & "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\artifacts\notification-inspector-polling\NotificationInspector.exe" --listen --print-content
@@ -84,17 +144,19 @@ Expected startup shape:
 
 ```text
 Package identity: not detected (...). Running unpackaged console collector.
+Database: C:\Users\<you>\AppData\Local\WindowsCleanNotifs\notifications.db
 Access status: Allowed
-Content printing is ON for this process because --print-content was supplied.
+Content printing is OFF. Enabled-source notifications will be stored but not printed.
+Newly discovered sources are disabled by default.
 Polling visible toast notifications every 1 seconds.
 Press Ctrl+C to stop.
 
 Startup snapshot visible to listener: 0
 ```
 
-The startup snapshot seeds deduplication and source discovery. Existing notifications visible at startup are not printed as newly received notifications.
+The startup snapshot seeds deduplication and source discovery. Existing notifications visible at startup can discover sources, but are not stored as newly captured notifications.
 
-When a previously unseen application is detected, the collector prints:
+When a previously unknown application is inserted into the database, the collector prints:
 
 ```text
 ----
@@ -102,9 +164,10 @@ Source discovered
 Event: poll
 App name: Example App
 App id: example.app.id
+Enabled: false
 ```
 
-For each newly detected notification after startup, the collector prints:
+For enabled sources only, newly detected notifications are stored. If `--print-content` is supplied, those enabled-source notifications are also printed with:
 
 - app display name;
 - app ID / AUMID;
@@ -114,35 +177,13 @@ For each newly detected notification after startup, the collector prints:
 - body/message;
 - raw text elements in order.
 
+Disabled-source notification content is neither stored nor printed.
+
 Stop with `Ctrl+C`. Shutdown should print `Stopped.` without an unhandled exception.
-
-## Deduplication
-
-Notification identity is:
-
-```text
-app ID + Windows notification ID + creation timestamp
-```
-
-The collector does not print the same identity repeatedly on every poll. Dedupe state is kept in memory and pruned after an identity has not appeared for 10 minutes.
-
-Applications are deduplicated by app ID, not display name.
-
-## Manual Verification
-
-1. Run `--check-access` and confirm it prints `Allowed`.
-2. Run `--listen --print-content`.
-3. Leave any existing notifications visible before startup and confirm they do not print as `New notification`.
-4. Trigger a notification from one app and confirm one `Source discovered` message plus one `New notification`.
-5. Leave that notification visible for several polls and confirm it is not printed repeatedly.
-6. Trigger multiple notifications from the same app and confirm only one source discovery appears for that app ID.
-7. Trigger notifications from at least two apps and confirm each app ID is discovered separately.
-8. Trigger a long plain-text notification and confirm the body and raw text elements remain readable.
-9. Stop with `Ctrl+C` and confirm shutdown is clean.
 
 ## Automated Tests
 
-The collector logic is tested without real Windows notifications through `INotificationSnapshotProvider`.
+The collector and storage logic are tested without real Windows notifications.
 
 From Windows PowerShell:
 
@@ -150,4 +191,39 @@ From Windows PowerShell:
 dotnet run --project "\\wsl.localhost\Debian\home\houtang\GitHub\windows-clean-notifs\tests\NotificationInspector.Tests\NotificationInspector.Tests.csproj"
 ```
 
-The tests cover duplicate snapshots, newly appearing notifications, multiple notifications from one app, multiple applications, notifications disappearing from later snapshots, and bounded deduplication cleanup.
+The tests cover:
+
+- duplicate snapshots;
+- newly appearing notifications;
+- multiple notifications from one app;
+- multiple applications;
+- notifications disappearing from later snapshots;
+- bounded in-memory dedupe cleanup;
+- newly discovered sources defaulting to disabled;
+- source metadata surviving database reopen;
+- enabling and disabling source selection;
+- rediscovery updating metadata without resetting selection;
+- disabled-source content not being stored;
+- enabled-source content being stored;
+- duplicate notification insert protection;
+- raw text element round-trip order;
+- startup snapshot notifications not being stored;
+- retention deleting old notifications while preserving sources.
+
+## Manual Verification
+
+1. Build the executable with the publish command above.
+2. Run `--check-access` and confirm it prints `Allowed`.
+3. Run `--listen` with no `--print-content`.
+4. Trigger a Discord notification and one notification from another app.
+5. Stop with `Ctrl+C`.
+6. Run `--list-sources` and confirm both apps appear as `Enabled: false`.
+7. Enable Discord using the exact Discord app ID from `--list-sources`.
+8. Run `--listen --print-content`.
+9. Trigger a new Discord notification and confirm it prints as `New notification`.
+10. Trigger a notification from the still-disabled other app and confirm its content does not print.
+11. Leave the same Discord toast visible for several polls and confirm it does not print repeatedly.
+12. Trigger rapid Discord notifications and confirm each visible notification appears once.
+13. Stop with `Ctrl+C` and confirm shutdown is clean.
+
+Because disabled-source content is intentionally not stored, use the automated tests to verify the SQLite privacy rule directly.
