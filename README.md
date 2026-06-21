@@ -2,6 +2,6 @@
 
 Local Windows notification dashboard work.
 
-The first technical spike is a terminal-only Windows notification inspector:
+The current terminal-only Windows notification collector is documented here:
 
-- [Notification listener spike docs](docs/technical-spike-notification-listener.md)
+- [Windows notification collector](docs/notification-collector.md)

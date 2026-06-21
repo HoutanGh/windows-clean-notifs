@@ -1,10 +1,10 @@
-# Technical Spike: Polling Windows Notification Collector
+# Windows Notification Collector
 
 This is a terminal-only Windows notification collector. It does not include the React UI, HTTP API, SSE, Discord-specific parsing, MSIX packaging, or AI filtering.
 
 The collector can persist enabled-source notifications to SQLite. Terminal content printing remains opt-in with `--print-content` because titles, bodies, and raw text elements may contain private information.
 
-## Current Finding
+## Capture Finding
 
 The unpackaged console app can read visible Windows toast notifications by polling `UserNotificationListener.GetNotificationsAsync(NotificationKinds.Toast)`.
 
