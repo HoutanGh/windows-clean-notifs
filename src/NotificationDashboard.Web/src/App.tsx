@@ -22,12 +22,6 @@ type DiscordChannelGroup = {
   notifications: NotificationItem[];
 };
 
-type DiscordServerGroup = {
-  name: string;
-  latestId: number;
-  channels: DiscordChannelGroup[];
-};
-
 export function App({
   api = defaultApi,
   createEventSource = createBrowserNotificationEventSource
@@ -61,7 +55,7 @@ export function App({
     () => sortNewestFirst(notifications.filter(isDiscordNotification)),
     [notifications]
   );
-  const discordGroups = useMemo(
+  const discordChannels = useMemo(
     () => groupDiscordNotifications(discordNotifications),
     [discordNotifications]
   );
@@ -316,7 +310,7 @@ export function App({
         ) : null}
 
         {activeView === 'discord' && discordAvailable && discordNotifications.length > 0 ? (
-          <DiscordBoard groups={discordGroups} />
+          <DiscordBoard channels={discordChannels} />
         ) : null}
 
         {notifications.length > 0 && hasOlder ? (
@@ -391,44 +385,15 @@ function NotificationRow({ notification }: { notification: NotificationItem }) {
   );
 }
 
-function DiscordBoard({ groups }: { groups: DiscordServerGroup[] }) {
-  const [selectedServerName, setSelectedServerName] = useState(groups[0]?.name ?? UngroupedLabel);
-
-  useEffect(() => {
-    if (groups.length === 0) {
-      return;
-    }
-
-    if (!groups.some((group) => group.name === selectedServerName)) {
-      setSelectedServerName(groups[0].name);
-    }
-  }, [groups, selectedServerName]);
-
-  if (groups.length === 0) {
+function DiscordBoard({ channels }: { channels: DiscordChannelGroup[] }) {
+  if (channels.length === 0) {
     return <StateMessage title="No Discord notifications yet" />;
   }
 
-  const selectedServer = groups.find((group) => group.name === selectedServerName) ?? groups[0];
-
   return (
     <section className="discord-board" aria-label="Discord notifications">
-      <div className="server-tabs" role="tablist" aria-label="Discord servers">
-        {groups.map((group) => (
-          <button
-            key={group.name}
-            type="button"
-            role="tab"
-            className={group.name === selectedServer.name ? 'active' : undefined}
-            aria-selected={group.name === selectedServer.name}
-            onClick={() => setSelectedServerName(group.name)}
-          >
-            {group.name}
-          </button>
-        ))}
-      </div>
-
       <div className="discord-columns" data-testid="discord-columns">
-        {selectedServer.channels.map((channel) => (
+        {channels.map((channel) => (
           <section
             key={channel.name}
             className="discord-channel-column"
@@ -490,37 +455,24 @@ function sortSources(items: NotificationSource[]): NotificationSource[] {
   });
 }
 
-function groupDiscordNotifications(items: NotificationItem[]): DiscordServerGroup[] {
-  const serverMap = new Map<string, Map<string, NotificationItem[]>>();
+function groupDiscordNotifications(items: NotificationItem[]): DiscordChannelGroup[] {
+  const channelMap = new Map<string, NotificationItem[]>();
 
   for (const notification of items) {
-    const serverName = normalizeGroupLabel(notification.discord?.server) ?? UngroupedLabel;
     const channelName = normalizeGroupLabel(notification.discord?.channel) ?? UngroupedLabel;
-    const channelMap = serverMap.get(serverName) ?? new Map<string, NotificationItem[]>();
     const channelItems = channelMap.get(channelName) ?? [];
 
     channelItems.push(notification);
     channelMap.set(channelName, channelItems);
-    serverMap.set(serverName, channelMap);
   }
 
-  return [...serverMap.entries()]
-    .map(([serverName, channelMap]) => {
-      const channels = [...channelMap.entries()]
-        .map(([channelName, notifications]) => {
-          const sortedNotifications = sortNewestFirst(notifications);
-          return {
-            name: channelName,
-            latestId: getHighestId(sortedNotifications) ?? 0,
-            notifications: sortedNotifications
-          };
-        })
-        .sort((left, right) => right.latestId - left.latestId || left.name.localeCompare(right.name));
-
+  return [...channelMap.entries()]
+    .map(([channelName, notifications]) => {
+      const sortedNotifications = sortNewestFirst(notifications);
       return {
-        name: serverName,
-        latestId: Math.max(...channels.map((channel) => channel.latestId)),
-        channels
+        name: channelName,
+        latestId: getHighestId(sortedNotifications) ?? 0,
+        notifications: sortedNotifications
       };
     })
     .sort((left, right) => right.latestId - left.latestId || left.name.localeCompare(right.name));

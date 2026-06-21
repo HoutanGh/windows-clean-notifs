@@ -219,30 +219,25 @@ describe('App', () => {
     expect(screen.getByText('Database failed.')).toBeInTheDocument();
   });
 
-  test('renders Discord view with server tabs and channel columns', async () => {
+  test('renders Discord view with channel columns', async () => {
     const api = createApi({
       getNotifications: vi.fn().mockResolvedValue([
         discordNotification(42, 'Main Chat', '#stocks-and-options', 'Trader Bot', 'NVDA breaking premarket high'),
         discordNotification(41, 'Main Chat', '#main', 'Alice', 'Morning all'),
-        discordNotification(40, 'Other Server', '#alerts', 'Scanner', 'TSLA alert')
+        discordNotification(40, 'Other Context', '#alerts', 'Scanner', 'TSLA alert')
       ])
     });
 
     renderApp(api);
     fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
 
-    expect(await screen.findByRole('tab', { name: 'Main Chat' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Other Server' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '#stocks-and-options' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '#stocks-and-options' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '#main' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '#alerts' })).toBeInTheDocument();
     expect(screen.getByText('Trader Bot')).toBeInTheDocument();
     expect(screen.getByText('NVDA breaking premarket high')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: '#alerts' })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('tab', { name: 'Other Server' }));
-
-    expect(screen.getByRole('heading', { name: '#alerts' })).toBeInTheDocument();
     expect(screen.getByText('TSLA alert')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Main Chat' })).not.toBeInTheDocument();
   });
 
   test('keeps unparsed Discord notifications visible in Ungrouped', async () => {
@@ -263,8 +258,7 @@ describe('App', () => {
     renderApp(api);
     fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
 
-    expect(await screen.findByRole('tab', { name: 'Ungrouped' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Ungrouped' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Ungrouped' })).toBeInTheDocument();
     expect(screen.getByText('Standalone Discord title')).toBeInTheDocument();
     expect(screen.getByText('Still visible')).toBeInTheDocument();
   });
@@ -314,7 +308,7 @@ function notification(id: number, overrides: Partial<NotificationItem> = {}): No
 
 function discordNotification(
   id: number,
-  server: string,
+  context: string,
   channel: string,
   sender: string,
   message: string
@@ -322,11 +316,11 @@ function discordNotification(
   return notification(id, {
     appId: 'com.squirrel.Discord.Discord',
     sourceApp: 'Discord',
-    primaryText: `${sender} (${channel}, ${server})`,
+    primaryText: `${sender} (${channel}, ${context})`,
     messageText: message,
     discord: {
       sender,
-      server,
+      context,
       channel,
       confidence: 'parsed'
     }

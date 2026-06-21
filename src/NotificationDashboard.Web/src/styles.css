@@ -129,8 +129,7 @@ h3 {
   gap: 10px;
 }
 
-.view-switch,
-.server-tabs {
+.view-switch {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -140,8 +139,7 @@ h3 {
   background: #ffffff;
 }
 
-.view-switch button,
-.server-tabs button {
+.view-switch button {
   min-height: 30px;
   padding: 0 10px;
   border: 0;
@@ -151,14 +149,12 @@ h3 {
   cursor: pointer;
 }
 
-.view-switch button:hover,
-.server-tabs button:hover {
+.view-switch button:hover {
   background: #eef1f4;
   color: #1d2329;
 }
 
-.view-switch button.active,
-.server-tabs button.active {
+.view-switch button.active {
   background: #1d2329;
   color: #ffffff;
 }
@@ -238,16 +234,6 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.server-tabs {
-  max-width: 100%;
-  overflow-x: auto;
-  align-self: flex-start;
-}
-
-.server-tabs button {
-  white-space: nowrap;
 }
 
 .discord-columns {
@@ -476,25 +462,21 @@ h3 {
   }
 
   .view-switch,
-  .server-tabs,
   .discord-channel-column {
     border-color: #3a444d;
     background: #171b1f;
   }
 
-  .view-switch button,
-  .server-tabs button {
+  .view-switch button {
     color: #a5b0ba;
   }
 
-  .view-switch button:hover,
-  .server-tabs button:hover {
+  .view-switch button:hover {
     background: #293139;
     color: #eef1f4;
   }
 
-  .view-switch button.active,
-  .server-tabs button.active {
+  .view-switch button.active {
     background: #eef1f4;
     color: #111416;
   }

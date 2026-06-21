@@ -20,7 +20,7 @@ export type NotificationItem = {
 
 export type DiscordNotificationContext = {
   sender?: string | null;
-  server?: string | null;
+  context?: string | null;
   channel?: string | null;
   confidence: 'parsed' | 'unknown' | string;
 };
