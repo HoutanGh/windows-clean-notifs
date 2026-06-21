@@ -7,9 +7,11 @@ const PageSize = 100;
 const defaultApi = createHttpDashboardApi();
 const DiscordAppId = 'com.squirrel.Discord.Discord';
 const UngroupedLabel = 'Ungrouped';
+const ThemeStorageKey = 'windows-clean-notifs-theme';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'unavailable';
 type ViewMode = 'feed' | 'discord';
+type ThemeMode = 'light' | 'night';
 
 type AppProps = {
   api?: DashboardApi;
@@ -42,6 +44,7 @@ export function App({
   const [streamVersion, setStreamVersion] = useState(0);
   const [streamReady, setStreamReady] = useState(false);
   const [activeView, setActiveView] = useState<ViewMode>('feed');
+  const [themeMode, setThemeMode] = useState<ThemeMode>(readInitialThemeMode);
 
   const enabledSourceCount = useMemo(
     () => sources.filter((source) => source.enabled).length,
@@ -65,6 +68,14 @@ export function App({
       setActiveView('feed');
     }
   }, [activeView, discordAvailable]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = themeMode;
+    try {
+      window.localStorage.setItem(ThemeStorageKey, themeMode);
+    } catch {
+    }
+  }, [themeMode]);
 
   const replaceNotifications = useCallback(async () => {
     const nextNotifications = sortNewestFirst(await api.getNotifications({ limit: PageSize }));
@@ -263,6 +274,24 @@ export function App({
               </button>
             </div>
           ) : null}
+          <div className="theme-switch" role="group" aria-label="Theme">
+            <button
+              type="button"
+              className={themeMode === 'light' ? 'active' : undefined}
+              aria-pressed={themeMode === 'light'}
+              onClick={() => setThemeMode('light')}
+            >
+              Light
+            </button>
+            <button
+              type="button"
+              className={themeMode === 'night' ? 'active' : undefined}
+              aria-pressed={themeMode === 'night'}
+              onClick={() => setThemeMode('night')}
+            >
+              Night
+            </button>
+          </div>
           <button type="button" className="button" onClick={openSources}>
             Sources
           </button>
@@ -497,6 +526,22 @@ function isDiscordNotification(notification: NotificationItem): boolean {
 function normalizeGroupLabel(value: string | null | undefined): string | null {
   const normalized = value?.trim();
   return normalized && normalized.length > 0 ? normalized : null;
+}
+
+function readInitialThemeMode(): ThemeMode {
+  try {
+    const storedTheme = window.localStorage.getItem(ThemeStorageKey);
+    if (storedTheme === 'light' || storedTheme === 'night') {
+      return storedTheme;
+    }
+  } catch {
+  }
+
+  if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) {
+    return 'night';
+  }
+
+  return 'light';
 }
 
 function mergeNotification(current: NotificationItem[], next: NotificationItem): NotificationItem[] {

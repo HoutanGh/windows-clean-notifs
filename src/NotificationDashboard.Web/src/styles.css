@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   font-family:
     Segoe UI,
     system-ui,
@@ -126,10 +126,13 @@ h3 {
 .header-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
-.view-switch {
+.view-switch,
+.theme-switch {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -139,7 +142,8 @@ h3 {
   background: #ffffff;
 }
 
-.view-switch button {
+.view-switch button,
+.theme-switch button {
   min-height: 30px;
   padding: 0 10px;
   border: 0;
@@ -149,12 +153,14 @@ h3 {
   cursor: pointer;
 }
 
-.view-switch button:hover {
+.view-switch button:hover,
+.theme-switch button:hover {
   background: #eef1f4;
   color: #1d2329;
 }
 
-.view-switch button.active {
+.view-switch button.active,
+.theme-switch button.active {
   background: #1d2329;
   color: #ffffff;
 }
@@ -429,81 +435,88 @@ h3 {
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root,
-  .app-shell {
-    background: #111416;
-    color: #eef1f4;
-  }
+:root[data-theme='night'] {
+  color-scheme: dark;
+  background: #111416;
+  color: #eef1f4;
+}
 
-  .app-header {
-    border-bottom-color: #2b333a;
-    background: rgba(17, 20, 22, 0.96);
-  }
+:root[data-theme='night'] .app-shell {
+  background: #111416;
+  color: #eef1f4;
+}
 
-  .status-line,
-  .source-name,
-  .notification-row time,
-  .source-row small,
-  .muted-text {
-    color: #a5b0ba;
-  }
+:root[data-theme='night'] .app-header {
+  border-bottom-color: #2b333a;
+  background: rgba(17, 20, 22, 0.96);
+}
 
-  .button {
-    border-color: #46515b;
-    background: #1d2329;
-    color: #eef1f4;
-  }
+:root[data-theme='night'] .status-line,
+:root[data-theme='night'] .source-name,
+:root[data-theme='night'] .notification-row time,
+:root[data-theme='night'] .source-row small,
+:root[data-theme='night'] .muted-text {
+  color: #a5b0ba;
+}
 
-  .button:hover:not(:disabled) {
-    border-color: #7a8590;
-    background: #293139;
-  }
+:root[data-theme='night'] .button {
+  border-color: #46515b;
+  background: #1d2329;
+  color: #eef1f4;
+}
 
-  .view-switch,
-  .discord-channel-column {
-    border-color: #3a444d;
-    background: #171b1f;
-  }
+:root[data-theme='night'] .button:hover:not(:disabled) {
+  border-color: #7a8590;
+  background: #293139;
+}
 
-  .view-switch button {
-    color: #a5b0ba;
-  }
+:root[data-theme='night'] .view-switch,
+:root[data-theme='night'] .theme-switch,
+:root[data-theme='night'] .discord-channel-column {
+  border-color: #3a444d;
+  background: #171b1f;
+}
 
-  .view-switch button:hover {
-    background: #293139;
-    color: #eef1f4;
-  }
+:root[data-theme='night'] .view-switch button,
+:root[data-theme='night'] .theme-switch button {
+  color: #a5b0ba;
+}
 
-  .view-switch button.active {
-    background: #eef1f4;
-    color: #111416;
-  }
+:root[data-theme='night'] .view-switch button:hover,
+:root[data-theme='night'] .theme-switch button:hover {
+  background: #293139;
+  color: #eef1f4;
+}
 
-  .notification-row,
-  .state-message,
-  .source-row,
-  .discord-channel-column header,
-  .discord-card {
-    border-color: #2b333a;
-  }
+:root[data-theme='night'] .view-switch button.active,
+:root[data-theme='night'] .theme-switch button.active {
+  background: #eef1f4;
+  color: #111416;
+}
 
-  .state-message strong {
-    color: #eef1f4;
-  }
+:root[data-theme='night'] .notification-row,
+:root[data-theme='night'] .state-message,
+:root[data-theme='night'] .source-row,
+:root[data-theme='night'] .discord-channel-column header,
+:root[data-theme='night'] .discord-card {
+  border-color: #2b333a;
+}
 
-  .sources-panel {
-    border-color: #3a444d;
-    background: #171b1f;
-    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.4);
-  }
+:root[data-theme='night'] .state-message strong {
+  color: #eef1f4;
+}
 
-  .discord-channel-column header span {
-    background: #293139;
-    color: #a5b0ba;
-  }
+:root[data-theme='night'] .sources-panel {
+  border-color: #3a444d;
+  background: #171b1f;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.4);
+}
 
-  .error-text {
-    color: #ffb4ab;
-  }
+:root[data-theme='night'] .discord-channel-column header span {
+  background: #293139;
+  color: #a5b0ba;
+}
+
+:root[data-theme='night'] .error-text {
+  color: #ffb4ab;
 }

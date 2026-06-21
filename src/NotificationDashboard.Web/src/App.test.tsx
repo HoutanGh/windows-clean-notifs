@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { App } from './App';
 import { ApiError, type DashboardApi } from './api';
 import type { NotificationEventSource, NotificationEventSourceFactory } from './events';
@@ -12,6 +12,11 @@ const health: HealthResponse = {
   pollingInterval: '00:00:01',
   retentionPeriod: '3.00:00:00'
 };
+
+afterEach(() => {
+  window.localStorage.clear();
+  document.documentElement.removeAttribute('data-theme');
+});
 
 describe('App', () => {
   test('loads initial notifications', async () => {
@@ -217,6 +222,22 @@ describe('App', () => {
 
     expect(await screen.findByText('Backend unavailable')).toBeInTheDocument();
     expect(screen.getByText('Database failed.')).toBeInTheDocument();
+  });
+
+  test('toggles and persists light and night mode', async () => {
+    const api = createApi();
+
+    renderApp(api);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Night' }));
+
+    expect(document.documentElement).toHaveAttribute('data-theme', 'night');
+    expect(window.localStorage.getItem('windows-clean-notifs-theme')).toBe('night');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Light' }));
+
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light');
+    expect(window.localStorage.getItem('windows-clean-notifs-theme')).toBe('light');
   });
 
   test('renders Discord view with channel columns', async () => {
