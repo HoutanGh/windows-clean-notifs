@@ -262,6 +262,76 @@ describe('App', () => {
     expect(screen.queryByRole('tab', { name: 'Main Chat' })).not.toBeInTheDocument();
   });
 
+  test('hides and restores Discord channel columns locally', async () => {
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(42, 'Main Chat', '#stocks-and-options', 'Trader Bot', 'NVDA breaking premarket high'),
+        discordNotification(41, 'Main Chat', '#main', 'Alice', 'Morning all')
+      ])
+    });
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Hide #main in Main Chat' }));
+
+    expect(screen.queryByRole('heading', { name: '#main' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Morning all')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '#stocks-and-options' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show #main in Main Chat' })).toBeInTheDocument();
+    expect(readHiddenDiscordChannelKeys()).toEqual(expect.arrayContaining([JSON.stringify(['Main Chat', '#main'])]));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show #main in Main Chat' }));
+
+    expect(await screen.findByRole('heading', { name: '#main' })).toBeInTheDocument();
+    expect(screen.getByText('Morning all')).toBeInTheDocument();
+    await waitFor(() => expect(readHiddenDiscordChannelKeys()).not.toContain(JSON.stringify(['Main Chat', '#main'])));
+  });
+
+  test('loads hidden Discord channel columns from browser storage', async () => {
+    window.localStorage.setItem(
+      'windows-clean-notifs-hidden-discord-channels',
+      JSON.stringify([JSON.stringify(['Main Chat', '#main'])])
+    );
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(42, 'Main Chat', '#stocks-and-options', 'Trader Bot', 'NVDA breaking premarket high'),
+        discordNotification(41, 'Main Chat', '#main', 'Alice', 'Morning all')
+      ])
+    });
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+
+    expect(screen.queryByRole('heading', { name: '#main' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Morning all')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '#stocks-and-options' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show #main in Main Chat' })).toBeInTheDocument();
+  });
+
+  test('shows all hidden Discord channel columns at once', async () => {
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(42, 'Main Chat', '#stocks-and-options', 'Trader Bot', 'NVDA breaking premarket high'),
+        discordNotification(41, 'Main Chat', '#main', 'Alice', 'Morning all')
+      ])
+    });
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Hide #stocks-and-options in Main Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Hide #main in Main Chat' }));
+
+    expect(await screen.findByText('All Discord channels hidden')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show all' }));
+
+    expect(await screen.findByRole('heading', { name: '#stocks-and-options' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '#main' })).toBeInTheDocument();
+    await waitFor(() => expect(readHiddenDiscordChannelKeys()).toEqual([]));
+  });
+
   test('keeps unparsed Discord notifications visible in Ungrouped', async () => {
     const api = createApi({
       getNotifications: vi.fn().mockResolvedValue([
@@ -357,6 +427,10 @@ function source(displayName: string, appId: string, enabled: boolean): Notificat
     firstSeenAt: '2026-06-21T12:00:00.0000000Z',
     lastSeenAt: '2026-06-21T12:05:00.0000000Z'
   };
+}
+
+function readHiddenDiscordChannelKeys(): string[] {
+  return JSON.parse(window.localStorage.getItem('windows-clean-notifs-hidden-discord-channels') ?? '[]') as string[];
 }
 
 function createFakeEventSourceFactory() {
