@@ -8,6 +8,7 @@ const defaultApi = createHttpDashboardApi();
 const DiscordAppId = 'com.squirrel.Discord.Discord';
 const UngroupedLabel = 'Ungrouped';
 const ThemeStorageKey = 'windows-clean-notifs-theme';
+const HiddenDiscordChannelsStorageKey = 'windows-clean-notifs-hidden-discord-channels';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'unavailable';
 type ViewMode = 'feed' | 'discord';
@@ -19,7 +20,9 @@ type AppProps = {
 };
 
 type DiscordChannelGroup = {
+  key: string;
   name: string;
+  context: string | null;
   latestId: number;
   notifications: NotificationItem[];
 };
@@ -45,6 +48,9 @@ export function App({
   const [streamReady, setStreamReady] = useState(false);
   const [activeView, setActiveView] = useState<ViewMode>('feed');
   const [themeMode, setThemeMode] = useState<ThemeMode>(readInitialThemeMode);
+  const [hiddenDiscordChannelKeys, setHiddenDiscordChannelKeys] = useState<Set<string>>(
+    readInitialHiddenDiscordChannelKeys
+  );
 
   const enabledSourceCount = useMemo(
     () => sources.filter((source) => source.enabled).length,
@@ -62,6 +68,14 @@ export function App({
     () => groupDiscordNotifications(discordNotifications),
     [discordNotifications]
   );
+  const visibleDiscordChannels = useMemo(
+    () => discordChannels.filter((channel) => !hiddenDiscordChannelKeys.has(channel.key)),
+    [discordChannels, hiddenDiscordChannelKeys]
+  );
+  const hiddenDiscordChannels = useMemo(
+    () => discordChannels.filter((channel) => hiddenDiscordChannelKeys.has(channel.key)),
+    [discordChannels, hiddenDiscordChannelKeys]
+  );
 
   useEffect(() => {
     if (activeView === 'discord' && !discordAvailable) {
@@ -76,6 +90,16 @@ export function App({
     } catch {
     }
   }, [themeMode]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        HiddenDiscordChannelsStorageKey,
+        JSON.stringify([...hiddenDiscordChannelKeys].sort())
+      );
+    } catch {
+    }
+  }, [hiddenDiscordChannelKeys]);
 
   const replaceNotifications = useCallback(async () => {
     const nextNotifications = sortNewestFirst(await api.getNotifications({ limit: PageSize }));
@@ -241,6 +265,26 @@ export function App({
     }
   }
 
+  function hideDiscordChannel(channelKey: string) {
+    setHiddenDiscordChannelKeys((current) => {
+      const next = new Set(current);
+      next.add(channelKey);
+      return next;
+    });
+  }
+
+  function showDiscordChannel(channelKey: string) {
+    setHiddenDiscordChannelKeys((current) => {
+      const next = new Set(current);
+      next.delete(channelKey);
+      return next;
+    });
+  }
+
+  function showAllDiscordChannels() {
+    setHiddenDiscordChannelKeys(new Set());
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -339,7 +383,13 @@ export function App({
         ) : null}
 
         {activeView === 'discord' && discordAvailable && discordNotifications.length > 0 ? (
-          <DiscordBoard channels={discordChannels} />
+          <DiscordBoard
+            channels={visibleDiscordChannels}
+            hiddenChannels={hiddenDiscordChannels}
+            onHideChannel={hideDiscordChannel}
+            onShowChannel={showDiscordChannel}
+            onShowAllChannels={showAllDiscordChannels}
+          />
         ) : null}
 
         {notifications.length > 0 && hasOlder ? (
@@ -414,37 +464,84 @@ function NotificationRow({ notification }: { notification: NotificationItem }) {
   );
 }
 
-function DiscordBoard({ channels }: { channels: DiscordChannelGroup[] }) {
-  if (channels.length === 0) {
-    return <StateMessage title="No Discord notifications yet" />;
-  }
-
+function DiscordBoard({
+  channels,
+  hiddenChannels,
+  onHideChannel,
+  onShowChannel,
+  onShowAllChannels
+}: {
+  channels: DiscordChannelGroup[];
+  hiddenChannels: DiscordChannelGroup[];
+  onHideChannel: (channelKey: string) => void;
+  onShowChannel: (channelKey: string) => void;
+  onShowAllChannels: () => void;
+}) {
   const columnStyle = {
     '--discord-channel-count': channels.length
   } as CSSProperties;
 
   return (
     <section className="discord-board" aria-label="Discord notifications">
-      <div className="discord-columns" data-testid="discord-columns" style={columnStyle}>
-        {channels.map((channel) => (
-          <section
-            key={channel.name}
-            className="discord-channel-column"
-            data-testid="discord-channel-column"
-            aria-label={`${channel.name} channel`}
-          >
-            <header>
-              <h3>{channel.name}</h3>
-              <span>{channel.notifications.length}</span>
-            </header>
-            <ol>
-              {channel.notifications.map((notification) => (
-                <DiscordNotificationCard key={notification.id} notification={notification} />
-              ))}
-            </ol>
-          </section>
-        ))}
-      </div>
+      {hiddenChannels.length > 0 ? (
+        <div className="discord-hidden-bar" aria-label="Hidden Discord channels">
+          <span>Hidden channels</span>
+          <div>
+            {hiddenChannels.map((channel) => (
+              <button
+                key={channel.key}
+                type="button"
+                className="button subtle"
+                aria-label={formatDiscordChannelActionLabel('Show', channel)}
+                onClick={() => onShowChannel(channel.key)}
+              >
+                {channel.name}
+              </button>
+            ))}
+            <button type="button" className="button subtle" onClick={onShowAllChannels}>
+              Show all
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {channels.length === 0 ? (
+        <StateMessage title="All Discord channels hidden" detail="Restore a hidden channel to show notifications here." />
+      ) : (
+        <div className="discord-columns" data-testid="discord-columns" style={columnStyle}>
+          {channels.map((channel) => (
+            <section
+              key={channel.key}
+              className="discord-channel-column"
+              data-testid="discord-channel-column"
+              aria-label={`${channel.name} channel`}
+            >
+              <header>
+                <div>
+                  <h3>{channel.name}</h3>
+                  {channel.context ? <small>{channel.context}</small> : null}
+                </div>
+                <div className="discord-channel-actions">
+                  <span>{channel.notifications.length}</span>
+                  <button
+                    type="button"
+                    className="hide-channel-button"
+                    aria-label={formatDiscordChannelActionLabel('Hide', channel)}
+                    onClick={() => onHideChannel(channel.key)}
+                  >
+                    Hide
+                  </button>
+                </div>
+              </header>
+              <ol>
+                {channel.notifications.map((notification) => (
+                  <DiscordNotificationCard key={notification.id} notification={notification} />
+                ))}
+              </ol>
+            </section>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -489,21 +586,29 @@ function sortSources(items: NotificationSource[]): NotificationSource[] {
 }
 
 function groupDiscordNotifications(items: NotificationItem[]): DiscordChannelGroup[] {
-  const channelMap = new Map<string, NotificationItem[]>();
+  const channelMap = new Map<string, { name: string; context: string | null; notifications: NotificationItem[] }>();
 
   for (const notification of items) {
     const channelName = normalizeGroupLabel(notification.discord?.channel) ?? UngroupedLabel;
-    const channelItems = channelMap.get(channelName) ?? [];
+    const contextName = normalizeGroupLabel(notification.discord?.context);
+    const channelKey = createDiscordChannelKey(channelName, contextName);
+    const channelGroup = channelMap.get(channelKey) ?? {
+      name: channelName,
+      context: contextName,
+      notifications: []
+    };
 
-    channelItems.push(notification);
-    channelMap.set(channelName, channelItems);
+    channelGroup.notifications.push(notification);
+    channelMap.set(channelKey, channelGroup);
   }
 
   return [...channelMap.entries()]
-    .map(([channelName, notifications]) => {
-      const sortedNotifications = sortNewestFirst(notifications);
+    .map(([channelKey, channelGroup]) => {
+      const sortedNotifications = sortNewestFirst(channelGroup.notifications);
       return {
-        name: channelName,
+        key: channelKey,
+        name: channelGroup.name,
+        context: channelGroup.context,
         latestId: getHighestId(sortedNotifications) ?? 0,
         notifications: sortedNotifications
       };
@@ -528,6 +633,14 @@ function normalizeGroupLabel(value: string | null | undefined): string | null {
   return normalized && normalized.length > 0 ? normalized : null;
 }
 
+function createDiscordChannelKey(channelName: string, contextName: string | null): string {
+  return JSON.stringify([contextName ?? '', channelName]);
+}
+
+function formatDiscordChannelActionLabel(action: 'Hide' | 'Show', channel: DiscordChannelGroup): string {
+  return channel.context ? `${action} ${channel.name} in ${channel.context}` : `${action} ${channel.name}`;
+}
+
 function readInitialThemeMode(): ThemeMode {
   try {
     const storedTheme = window.localStorage.getItem(ThemeStorageKey);
@@ -542,6 +655,26 @@ function readInitialThemeMode(): ThemeMode {
   }
 
   return 'light';
+}
+
+function readInitialHiddenDiscordChannelKeys(): Set<string> {
+  try {
+    const storedKeys = window.localStorage.getItem(HiddenDiscordChannelsStorageKey);
+    if (!storedKeys) {
+      return new Set();
+    }
+
+    const parsedKeys = JSON.parse(storedKeys);
+    if (!Array.isArray(parsedKeys)) {
+      return new Set();
+    }
+
+    return new Set(parsedKeys.filter((value): value is string => (
+      typeof value === 'string' && value.length > 0
+    )));
+  } catch {
+    return new Set();
+  }
 }
 
 function mergeNotification(current: NotificationItem[], next: NotificationItem): NotificationItem[] {
