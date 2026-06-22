@@ -240,7 +240,7 @@ h3 {
 .discord-board {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .discord-hidden-bar {
@@ -248,10 +248,10 @@ h3 {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 8px 0;
+  padding: 6px 0 8px;
   border-bottom: 1px solid #e0e4e8;
   color: #52606c;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .discord-hidden-bar > div {
@@ -262,23 +262,23 @@ h3 {
 }
 
 .discord-hidden-bar .button {
-  min-height: 28px;
-  padding: 0 9px;
+  min-height: 26px;
+  padding: 0 8px;
   font-size: 12px;
 }
 
 .discord-columns {
   display: grid;
   grid-template-columns: repeat(var(--discord-channel-count), minmax(0, 1fr));
-  gap: 12px;
+  gap: 10px;
   padding-bottom: 8px;
 }
 
 .discord-channel-column {
   min-width: 0;
-  border: 1px solid #d8dee4;
+  border: 1px solid #d4dae0;
   border-radius: 8px;
-  background: #ffffff;
+  background: #fbfcfd;
 }
 
 .discord-channel-column header {
@@ -286,9 +286,11 @@ h3 {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 40px;
-  padding: 9px 10px;
-  border-bottom: 1px solid #e2e6ea;
+  min-height: 44px;
+  padding: 8px 9px;
+  border-bottom: 1px solid #dfe5eb;
+  background: #f7f9fb;
+  border-radius: 8px 8px 0 0;
 }
 
 .discord-channel-column header > div:first-child {
@@ -297,6 +299,9 @@ h3 {
 
 .discord-channel-column h3 {
   min-width: 0;
+  color: #1d2329;
+  font-size: 13px;
+  line-height: 1.2;
   overflow-wrap: anywhere;
 }
 
@@ -313,33 +318,37 @@ h3 {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 
 .discord-channel-actions span {
-  min-width: 24px;
+  min-width: 22px;
   padding: 2px 7px;
   border-radius: 999px;
-  background: #eef1f4;
+  background: #e9eef3;
   color: #52606c;
   font-size: 12px;
+  line-height: 1.25;
   text-align: center;
 }
 
 .hide-channel-button {
-  min-height: 26px;
-  padding: 0 8px;
-  border: 1px solid #c5cdd5;
-  border-radius: 5px;
-  background: #ffffff;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
   color: #52606c;
-  font-size: 12px;
+  font-size: 17px;
+  line-height: 1;
   cursor: pointer;
 }
 
 .hide-channel-button:hover {
-  border-color: #65717c;
-  background: #eef1f4;
+  background: #e9eef3;
   color: #1d2329;
 }
 
@@ -353,31 +362,43 @@ h3 {
 }
 
 .discord-card {
-  padding: 10px;
-  border-bottom: 1px solid #edf0f2;
+  padding: 8px 9px 9px;
+  border-bottom: 1px solid #e8edf1;
+  background: #ffffff;
 }
 
 .discord-card:last-child {
   border-bottom: 0;
 }
 
+.discord-card-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .discord-card time {
-  display: block;
+  flex: 0 0 auto;
   color: #65717c;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.35;
+  white-space: nowrap;
 }
 
 .discord-card strong {
-  display: block;
-  margin-top: 3px;
-  line-height: 1.35;
+  min-width: 0;
+  color: #1d2329;
+  font-size: 13px;
+  line-height: 1.25;
   overflow-wrap: anywhere;
 }
 
 .discord-card p {
-  margin-top: 4px;
-  line-height: 1.38;
+  margin-top: 3px;
+  color: #1d2329;
+  font-size: 13px;
+  line-height: 1.34;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -524,6 +545,7 @@ h3 {
 :root[data-theme='night'] .status-line,
 :root[data-theme='night'] .source-name,
 :root[data-theme='night'] .notification-row time,
+:root[data-theme='night'] .discord-card time,
 :root[data-theme='night'] .discord-channel-column small,
 :root[data-theme='night'] .source-row small,
 :root[data-theme='night'] .discord-hidden-bar,
@@ -542,14 +564,20 @@ h3 {
   background: #293139;
 }
 
+:root[data-theme='night'] .discord-hidden-bar .button {
+  background: transparent;
+}
+
+:root[data-theme='night'] .discord-hidden-bar .button:hover:not(:disabled) {
+  background: #293139;
+}
+
 :root[data-theme='night'] .hide-channel-button {
-  border-color: #46515b;
-  background: #1d2329;
+  background: transparent;
   color: #a5b0ba;
 }
 
 :root[data-theme='night'] .hide-channel-button:hover {
-  border-color: #7a8590;
   background: #293139;
   color: #eef1f4;
 }
@@ -559,6 +587,16 @@ h3 {
 :root[data-theme='night'] .discord-channel-column {
   border-color: #3a444d;
   background: #171b1f;
+}
+
+:root[data-theme='night'] .discord-channel-column header {
+  background: #1d2329;
+}
+
+:root[data-theme='night'] .discord-channel-column h3,
+:root[data-theme='night'] .discord-card strong,
+:root[data-theme='night'] .discord-card p {
+  color: #eef1f4;
 }
 
 :root[data-theme='night'] .view-switch button,
@@ -600,6 +638,10 @@ h3 {
 :root[data-theme='night'] .discord-channel-actions span {
   background: #293139;
   color: #a5b0ba;
+}
+
+:root[data-theme='night'] .discord-card {
+  background: #171b1f;
 }
 
 :root[data-theme='night'] .error-text {

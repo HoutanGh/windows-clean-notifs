@@ -527,9 +527,10 @@ function DiscordBoard({
                     type="button"
                     className="hide-channel-button"
                     aria-label={formatDiscordChannelActionLabel('Hide', channel)}
+                    title={formatDiscordChannelActionLabel('Hide', channel)}
                     onClick={() => onHideChannel(channel.key)}
                   >
-                    Hide
+                    <span aria-hidden="true">×</span>
                   </button>
                 </div>
               </header>
@@ -553,8 +554,10 @@ function DiscordNotificationCard({ notification }: { notification: NotificationI
 
   return (
     <li className="discord-card" data-testid="discord-notification-card" data-id={notification.id}>
-      <time dateTime={notification.timestamp}>{formatLocalTimestamp(notification.timestamp)}</time>
-      <strong>{sender}</strong>
+      <div className="discord-card-meta">
+        <strong>{sender}</strong>
+        <time dateTime={notification.timestamp}>{formatCompactTimestamp(notification.timestamp)}</time>
+      </div>
       {isPresent(notification.messageText) ? (
         <p>{notification.messageText}</p>
       ) : null}
@@ -728,6 +731,19 @@ function formatLocalTimestamp(value: string): string {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  }).format(timestamp);
+}
+
+function formatCompactTimestamp(value: string): string {
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit'
