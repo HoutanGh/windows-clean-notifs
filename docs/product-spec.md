@@ -95,6 +95,7 @@ Layout:
 
 - Discord channels appear as columns.
 - Each column shows newest-first notifications for that channel.
+- Individual Discord columns can be hidden and restored as a browser-local display preference.
 - Direct messages, group DMs, or unparsable Discord notifications appear in an **Ungrouped** or equivalent fallback area.
 - Switching view modes does not change source selection, storage, retention, or notification capture.
 
@@ -241,7 +242,7 @@ The dashboard displays notifications that applications successfully publish to W
 
 - Discord API integration, bot tokens, or guaranteed Discord message archive behaviour.
 - Discord replies, reactions, avatars, attachments, or click-through actions.
-- Server tabs or persistent channel selection settings.
+- Server tabs or backend-managed channel selection settings.
 - Source-aware layouts for applications other than Discord unless explicitly specified.
 - AI or keyword filtering.
 - Generic notification replies, actions, links, or opening the source application.

@@ -429,6 +429,7 @@ The dashboard is a compact single page with:
 
 - a merged newest-first feed from enabled sources;
 - an optional Discord view with channel columns when Discord is enabled;
+- browser-local hide/show controls for Discord channel columns;
 - explicit Light and Night theme controls stored in browser local storage;
 - live updates through `GET /api/events`;
 - a Sources panel backed by `GET /api/sources` and `PUT /api/sources/selection`;
