@@ -9,6 +9,7 @@ const DiscordAppId = 'com.squirrel.Discord.Discord';
 const UngroupedLabel = 'Ungrouped';
 const ThemeStorageKey = 'windows-clean-notifs-theme';
 const HiddenDiscordChannelsStorageKey = 'windows-clean-notifs-hidden-discord-channels';
+const DiscordChannelOrderStorageKey = 'windows-clean-notifs-discord-channel-order';
 const ChromeHiddenStorageKey = 'windows-clean-notifs-chrome-hidden';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'unavailable';
@@ -69,6 +70,9 @@ export function App({
   const [hiddenDiscordChannelKeys, setHiddenDiscordChannelKeys] = useState<Set<string>>(
     readInitialHiddenDiscordChannelKeys
   );
+  const [discordChannelOrderKeys, setDiscordChannelOrderKeys] = useState<string[]>(
+    readInitialDiscordChannelOrderKeys
+  );
 
   const enabledSourceCount = useMemo(
     () => sources.filter((source) => source.enabled).length,
@@ -86,13 +90,17 @@ export function App({
     () => groupDiscordNotifications(discordNotifications),
     [discordNotifications]
   );
+  const orderedDiscordChannels = useMemo(
+    () => orderDiscordChannels(discordChannels, discordChannelOrderKeys),
+    [discordChannels, discordChannelOrderKeys]
+  );
   const visibleDiscordChannels = useMemo(
-    () => discordChannels.filter((channel) => !hiddenDiscordChannelKeys.has(channel.key)),
-    [discordChannels, hiddenDiscordChannelKeys]
+    () => orderedDiscordChannels.filter((channel) => !hiddenDiscordChannelKeys.has(channel.key)),
+    [orderedDiscordChannels, hiddenDiscordChannelKeys]
   );
   const hiddenDiscordChannels = useMemo(
-    () => discordChannels.filter((channel) => hiddenDiscordChannelKeys.has(channel.key)),
-    [discordChannels, hiddenDiscordChannelKeys]
+    () => orderedDiscordChannels.filter((channel) => hiddenDiscordChannelKeys.has(channel.key)),
+    [orderedDiscordChannels, hiddenDiscordChannelKeys]
   );
 
   useEffect(() => {
@@ -118,6 +126,17 @@ export function App({
     } catch {
     }
   }, [hiddenDiscordChannelKeys]);
+
+  useEffect(() => {
+    setDiscordChannelOrderKeys((current) => appendMissingChannelOrderKeys(current, discordChannels));
+  }, [discordChannels]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(DiscordChannelOrderStorageKey, JSON.stringify(discordChannelOrderKeys));
+    } catch {
+    }
+  }, [discordChannelOrderKeys]);
 
   useEffect(() => {
     try {
@@ -737,6 +756,50 @@ function groupDiscordNotifications(items: NotificationItem[]): DiscordChannelGro
     .sort((left, right) => right.latestId - left.latestId || left.name.localeCompare(right.name));
 }
 
+function orderDiscordChannels(
+  channels: DiscordChannelGroup[],
+  channelOrderKeys: string[]
+): DiscordChannelGroup[] {
+  const channelMap = new Map(channels.map((channel) => [channel.key, channel]));
+  const orderedChannels: DiscordChannelGroup[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const channelKey of channelOrderKeys) {
+    const channel = channelMap.get(channelKey);
+    if (channel && !seenKeys.has(channelKey)) {
+      orderedChannels.push(channel);
+      seenKeys.add(channelKey);
+    }
+  }
+
+  for (const channel of channels) {
+    if (!seenKeys.has(channel.key)) {
+      orderedChannels.push(channel);
+      seenKeys.add(channel.key);
+    }
+  }
+
+  return orderedChannels;
+}
+
+function appendMissingChannelOrderKeys(
+  channelOrderKeys: string[],
+  channels: DiscordChannelGroup[]
+): string[] {
+  const seenKeys = new Set(channelOrderKeys);
+  let nextChannelOrderKeys: string[] | null = null;
+
+  for (const channel of channels) {
+    if (!seenKeys.has(channel.key)) {
+      nextChannelOrderKeys ??= [...channelOrderKeys];
+      nextChannelOrderKeys.push(channel.key);
+      seenKeys.add(channel.key);
+    }
+  }
+
+  return nextChannelOrderKeys ?? channelOrderKeys;
+}
+
 function isDiscordSource(source: NotificationSource): boolean {
   const appId = source.appId.toLowerCase();
   const displayName = source.displayName.toLowerCase();
@@ -783,6 +846,26 @@ function readInitialChromeHidden(): boolean {
     return window.localStorage.getItem(ChromeHiddenStorageKey) === 'true';
   } catch {
     return false;
+  }
+}
+
+function readInitialDiscordChannelOrderKeys(): string[] {
+  try {
+    const storedKeys = window.localStorage.getItem(DiscordChannelOrderStorageKey);
+    if (!storedKeys) {
+      return [];
+    }
+
+    const parsedKeys = JSON.parse(storedKeys);
+    if (!Array.isArray(parsedKeys)) {
+      return [];
+    }
+
+    return parsedKeys.filter((value): value is string => (
+      typeof value === 'string' && value.length > 0
+    ));
+  } catch {
+    return [];
   }
 }
 
