@@ -9,10 +9,12 @@ const DiscordAppId = 'com.squirrel.Discord.Discord';
 const UngroupedLabel = 'Ungrouped';
 const ThemeStorageKey = 'windows-clean-notifs-theme';
 const HiddenDiscordChannelsStorageKey = 'windows-clean-notifs-hidden-discord-channels';
+const ChromeHiddenStorageKey = 'windows-clean-notifs-chrome-hidden';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'unavailable';
 type ViewMode = 'feed' | 'discord';
 type ThemeMode = 'light' | 'night';
+type DashboardControlsVariant = 'header' | 'overlay';
 
 type AppProps = {
   api?: DashboardApi;
@@ -25,6 +27,21 @@ type DiscordChannelGroup = {
   context: string | null;
   latestId: number;
   notifications: NotificationItem[];
+};
+
+type DashboardControlsProps = {
+  variant: DashboardControlsVariant;
+  discordAvailable: boolean;
+  activeView: ViewMode;
+  onViewChange: (view: ViewMode) => void;
+  themeMode: ThemeMode;
+  onThemeModeChange: (themeMode: ThemeMode) => void;
+  onOpenSources: () => void;
+  chromeHidden: boolean;
+  onChromeHiddenChange: (chromeHidden: boolean) => void;
+  hiddenChannels: DiscordChannelGroup[];
+  onShowChannel: (channelKey: string) => void;
+  onShowAllChannels: () => void;
 };
 
 export function App({
@@ -48,6 +65,7 @@ export function App({
   const [streamReady, setStreamReady] = useState(false);
   const [activeView, setActiveView] = useState<ViewMode>('feed');
   const [themeMode, setThemeMode] = useState<ThemeMode>(readInitialThemeMode);
+  const [chromeHidden, setChromeHidden] = useState(readInitialChromeHidden);
   const [hiddenDiscordChannelKeys, setHiddenDiscordChannelKeys] = useState<Set<string>>(
     readInitialHiddenDiscordChannelKeys
   );
@@ -100,6 +118,13 @@ export function App({
     } catch {
     }
   }, [hiddenDiscordChannelKeys]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(ChromeHiddenStorageKey, chromeHidden ? 'true' : 'false');
+    } catch {
+    }
+  }, [chromeHidden]);
 
   const replaceNotifications = useCallback(async () => {
     const nextNotifications = sortNewestFirst(await api.getNotifications({ limit: PageSize }));
@@ -286,61 +311,51 @@ export function App({
   }
 
   return (
-    <div className="app-shell">
-      <header className="app-header">
-        <div>
-          <h1>Windows Clean Notifications</h1>
-          <p className="status-line">
-            <span className={`status-dot status-${connectionStatus}`} aria-hidden="true" />
-            {connectionLabel(connectionStatus)}
-          </p>
-        </div>
-        <div className="header-actions">
-          {discordAvailable ? (
-            <div className="view-switch" role="tablist" aria-label="View">
-              <button
-                type="button"
-                role="tab"
-                className={activeView === 'feed' ? 'active' : undefined}
-                aria-selected={activeView === 'feed'}
-                onClick={() => setActiveView('feed')}
-              >
-                Feed
-              </button>
-              <button
-                type="button"
-                role="tab"
-                className={activeView === 'discord' ? 'active' : undefined}
-                aria-selected={activeView === 'discord'}
-                onClick={() => setActiveView('discord')}
-              >
-                Discord
-              </button>
-            </div>
-          ) : null}
-          <div className="theme-switch" role="group" aria-label="Theme">
-            <button
-              type="button"
-              className={themeMode === 'light' ? 'active' : undefined}
-              aria-pressed={themeMode === 'light'}
-              onClick={() => setThemeMode('light')}
-            >
-              Light
-            </button>
-            <button
-              type="button"
-              className={themeMode === 'night' ? 'active' : undefined}
-              aria-pressed={themeMode === 'night'}
-              onClick={() => setThemeMode('night')}
-            >
-              Night
-            </button>
+    <div className={chromeHidden ? 'app-shell chrome-hidden' : 'app-shell'}>
+      {chromeHidden ? (
+        <div className="chrome-hover-zone" aria-label="Hidden dashboard controls">
+          <div className="chrome-overlay-toolbar">
+            <DashboardControls
+              variant="overlay"
+              discordAvailable={discordAvailable}
+              activeView={activeView}
+              onViewChange={setActiveView}
+              themeMode={themeMode}
+              onThemeModeChange={setThemeMode}
+              onOpenSources={openSources}
+              chromeHidden={chromeHidden}
+              onChromeHiddenChange={setChromeHidden}
+              hiddenChannels={hiddenDiscordChannels}
+              onShowChannel={showDiscordChannel}
+              onShowAllChannels={showAllDiscordChannels}
+            />
           </div>
-          <button type="button" className="button" onClick={openSources}>
-            Sources
-          </button>
         </div>
-      </header>
+      ) : (
+        <header className="app-header">
+          <div>
+            <h1>Windows Clean Notifications</h1>
+            <p className="status-line">
+              <span className={`status-dot status-${connectionStatus}`} aria-hidden="true" />
+              {connectionLabel(connectionStatus)}
+            </p>
+          </div>
+          <DashboardControls
+            variant="header"
+            discordAvailable={discordAvailable}
+            activeView={activeView}
+            onViewChange={setActiveView}
+            themeMode={themeMode}
+            onThemeModeChange={setThemeMode}
+            onOpenSources={openSources}
+            chromeHidden={chromeHidden}
+            onChromeHiddenChange={setChromeHidden}
+            hiddenChannels={hiddenDiscordChannels}
+            onShowChannel={showDiscordChannel}
+            onShowAllChannels={showAllDiscordChannels}
+          />
+        </header>
+      )}
 
       <main className="feed-shell">
         {health && health.listenerAccessStatus !== 'Allowed' ? (
@@ -386,6 +401,7 @@ export function App({
           <DiscordBoard
             channels={visibleDiscordChannels}
             hiddenChannels={hiddenDiscordChannels}
+            showHiddenChannelsBar={!chromeHidden}
             onHideChannel={hideDiscordChannel}
             onShowChannel={showDiscordChannel}
             onShowAllChannels={showAllDiscordChannels}
@@ -447,6 +463,80 @@ export function App({
   );
 }
 
+function DashboardControls({
+  variant,
+  discordAvailable,
+  activeView,
+  onViewChange,
+  themeMode,
+  onThemeModeChange,
+  onOpenSources,
+  chromeHidden,
+  onChromeHiddenChange,
+  hiddenChannels,
+  onShowChannel,
+  onShowAllChannels
+}: DashboardControlsProps) {
+  return (
+    <div className={variant === 'header' ? 'header-actions' : 'chrome-overlay-actions'}>
+      {discordAvailable ? (
+        <div className="view-switch" role="tablist" aria-label="View">
+          <button
+            type="button"
+            role="tab"
+            className={activeView === 'feed' ? 'active' : undefined}
+            aria-selected={activeView === 'feed'}
+            onClick={() => onViewChange('feed')}
+          >
+            Feed
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className={activeView === 'discord' ? 'active' : undefined}
+            aria-selected={activeView === 'discord'}
+            onClick={() => onViewChange('discord')}
+          >
+            Discord
+          </button>
+        </div>
+      ) : null}
+      <div className="theme-switch" role="group" aria-label="Theme">
+        <button
+          type="button"
+          className={themeMode === 'light' ? 'active' : undefined}
+          aria-pressed={themeMode === 'light'}
+          onClick={() => onThemeModeChange('light')}
+        >
+          Light
+        </button>
+        <button
+          type="button"
+          className={themeMode === 'night' ? 'active' : undefined}
+          aria-pressed={themeMode === 'night'}
+          onClick={() => onThemeModeChange('night')}
+        >
+          Night
+        </button>
+      </div>
+      {variant === 'overlay' && hiddenChannels.length > 0 ? (
+        <HiddenDiscordChannelsControls
+          channels={hiddenChannels}
+          onShowChannel={onShowChannel}
+          onShowAllChannels={onShowAllChannels}
+          compact
+        />
+      ) : null}
+      <button type="button" className="button" onClick={onOpenSources}>
+        Sources
+      </button>
+      <button type="button" className="button subtle" onClick={() => onChromeHiddenChange(!chromeHidden)}>
+        {chromeHidden ? 'Show controls' : 'Hide controls'}
+      </button>
+    </div>
+  );
+}
+
 function NotificationRow({ notification }: { notification: NotificationItem }) {
   return (
     <li className="notification-row" data-testid="notification-row" data-id={notification.id}>
@@ -464,15 +554,54 @@ function NotificationRow({ notification }: { notification: NotificationItem }) {
   );
 }
 
+function HiddenDiscordChannelsControls({
+  channels,
+  onShowChannel,
+  onShowAllChannels,
+  compact = false
+}: {
+  channels: DiscordChannelGroup[];
+  onShowChannel: (channelKey: string) => void;
+  onShowAllChannels: () => void;
+  compact?: boolean;
+}) {
+  return (
+    <div
+      className={compact ? 'discord-hidden-controls compact' : 'discord-hidden-controls'}
+      aria-label="Hidden Discord channels"
+    >
+      <span>{compact ? `Hidden ${channels.length}` : 'Hidden channels'}</span>
+      <div>
+        {channels.map((channel) => (
+          <button
+            key={channel.key}
+            type="button"
+            className="button subtle"
+            aria-label={formatDiscordChannelActionLabel('Show', channel)}
+            onClick={() => onShowChannel(channel.key)}
+          >
+            {channel.name}
+          </button>
+        ))}
+        <button type="button" className="button subtle" onClick={onShowAllChannels}>
+          Show all
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function DiscordBoard({
   channels,
   hiddenChannels,
+  showHiddenChannelsBar,
   onHideChannel,
   onShowChannel,
   onShowAllChannels
 }: {
   channels: DiscordChannelGroup[];
   hiddenChannels: DiscordChannelGroup[];
+  showHiddenChannelsBar: boolean;
   onHideChannel: (channelKey: string) => void;
   onShowChannel: (channelKey: string) => void;
   onShowAllChannels: () => void;
@@ -483,26 +612,12 @@ function DiscordBoard({
 
   return (
     <section className="discord-board" aria-label="Discord notifications">
-      {hiddenChannels.length > 0 ? (
-        <div className="discord-hidden-bar" aria-label="Hidden Discord channels">
-          <span>Hidden channels</span>
-          <div>
-            {hiddenChannels.map((channel) => (
-              <button
-                key={channel.key}
-                type="button"
-                className="button subtle"
-                aria-label={formatDiscordChannelActionLabel('Show', channel)}
-                onClick={() => onShowChannel(channel.key)}
-              >
-                {channel.name}
-              </button>
-            ))}
-            <button type="button" className="button subtle" onClick={onShowAllChannels}>
-              Show all
-            </button>
-          </div>
-        </div>
+      {showHiddenChannelsBar && hiddenChannels.length > 0 ? (
+        <HiddenDiscordChannelsControls
+          channels={hiddenChannels}
+          onShowChannel={onShowChannel}
+          onShowAllChannels={onShowAllChannels}
+        />
       ) : null}
 
       {channels.length === 0 ? (
@@ -658,6 +773,14 @@ function readInitialThemeMode(): ThemeMode {
   }
 
   return 'light';
+}
+
+function readInitialChromeHidden(): boolean {
+  try {
+    return window.localStorage.getItem(ChromeHiddenStorageKey) === 'true';
+  } catch {
+    return false;
+  }
 }
 
 function readInitialHiddenDiscordChannelKeys(): Set<string> {
