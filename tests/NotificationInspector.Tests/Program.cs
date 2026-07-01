@@ -91,7 +91,14 @@ internal static class Program
             }
         }
 
-        return failures == 0 ? 0 : 1;
+        var exitCode = failures == 0 ? 0 : 1;
+        DiagnosticLog($"TEST HARNESS RETURNING exitCode={exitCode} failures={failures}");
+        return exitCode;
+    }
+
+    private static void DiagnosticLog(string message)
+    {
+        Console.Error.WriteLine($"DIAG {DateTimeOffset.Now:O} {message}");
     }
 
     private static async Task DuplicateSnapshotsDoNotEmitNewNotifications()
@@ -1539,8 +1546,11 @@ internal static class Program
 
     private sealed class ApiTestHost : IAsyncDisposable
     {
+        private static int _nextId;
+        private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(5);
         private readonly TestDatabase _testDb;
         private readonly WebApplication _app;
+        private readonly int _id;
 
         private ApiTestHost(
             TestDatabase testDb,
@@ -1549,6 +1559,7 @@ internal static class Program
             SqliteNotificationStore store,
             NotificationEventHub hub)
         {
+            _id = ++_nextId;
             _testDb = testDb;
             _app = app;
             Client = client;
@@ -1608,10 +1619,33 @@ internal static class Program
 
         public async ValueTask DisposeAsync()
         {
+            Program.DiagnosticLog($"ApiTestHost#{_id} DisposeAsync start subscribers={Hub.SubscriberCount}");
+
+            Program.DiagnosticLog($"ApiTestHost#{_id} Client.Dispose start subscribers={Hub.SubscriberCount}");
             Client.Dispose();
-            await _app.StopAsync();
+            Program.DiagnosticLog($"ApiTestHost#{_id} Client.Dispose end subscribers={Hub.SubscriberCount}");
+
+            Program.DiagnosticLog($"ApiTestHost#{_id} _app.StopAsync start subscribers={Hub.SubscriberCount}");
+            using var stopCts = new CancellationTokenSource(StopTimeout);
+            try
+            {
+                await _app.StopAsync(stopCts.Token);
+                Program.DiagnosticLog($"ApiTestHost#{_id} _app.StopAsync end subscribers={Hub.SubscriberCount}");
+            }
+            catch (OperationCanceledException) when (stopCts.IsCancellationRequested)
+            {
+                Program.DiagnosticLog(
+                    $"ApiTestHost#{_id} _app.StopAsync timed out after {StopTimeout.TotalSeconds.ToString(CultureInfo.InvariantCulture)}s subscribers={Hub.SubscriberCount}");
+                throw;
+            }
+
+            Program.DiagnosticLog($"ApiTestHost#{_id} _app.DisposeAsync start subscribers={Hub.SubscriberCount}");
             await _app.DisposeAsync();
+            Program.DiagnosticLog($"ApiTestHost#{_id} _app.DisposeAsync end subscribers={Hub.SubscriberCount}");
+
+            Program.DiagnosticLog($"ApiTestHost#{_id} TestDatabase.Delete start");
             _testDb.Delete();
+            Program.DiagnosticLog($"ApiTestHost#{_id} TestDatabase.Delete end");
         }
     }
 
