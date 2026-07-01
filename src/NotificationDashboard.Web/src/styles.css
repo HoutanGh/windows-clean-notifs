@@ -135,47 +135,90 @@ h3 {
   gap: 10px;
 }
 
-.chrome-hover-zone {
+.chrome-control-rail {
   position: fixed;
-  top: 0;
-  right: 0;
-  left: 0;
+  top: 50%;
+  right: 8px;
   z-index: 6;
-  min-height: 18px;
-  padding: 8px 20px 22px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transform: translateY(-50%);
 }
 
-.chrome-overlay-toolbar {
+.chrome-rail-handle {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid #c5cdd5;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #52606c;
+  box-shadow: 0 8px 24px rgba(27, 39, 51, 0.14);
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+}
+
+.chrome-rail-handle:hover,
+.chrome-control-rail:focus-within .chrome-rail-handle {
+  color: #1d2329;
+  background: #ffffff;
+}
+
+.chrome-rail-menu {
   display: flex;
-  justify-content: center;
   opacity: 0;
   pointer-events: none;
-  transform: translateY(-8px);
+  transform: translateX(8px);
   transition:
     opacity 140ms ease,
     transform 140ms ease;
 }
 
-.chrome-hover-zone:hover .chrome-overlay-toolbar,
-.chrome-hover-zone:focus-within .chrome-overlay-toolbar {
+.chrome-control-rail:hover .chrome-rail-menu,
+.chrome-control-rail:focus-within .chrome-rail-menu {
   opacity: 1;
   pointer-events: auto;
-  transform: translateY(0);
+  transform: translateX(0);
 }
 
-.chrome-overlay-actions {
+.chrome-rail-actions {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  max-width: calc(100vw - 40px);
+  gap: 7px;
+  max-width: min(220px, calc(100vw - 54px));
   padding: 6px;
   border: 1px solid #c5cdd5;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 14px 36px rgba(27, 39, 51, 0.16);
   backdrop-filter: blur(12px);
+}
+
+.chrome-rail-actions .view-switch,
+.chrome-rail-actions .theme-switch {
+  width: 100%;
+}
+
+.chrome-rail-actions .view-switch button,
+.chrome-rail-actions .theme-switch button,
+.chrome-rail-actions > .button {
+  width: 100%;
+}
+
+.chrome-rail-actions .discord-hidden-controls {
+  width: 100%;
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.chrome-rail-actions .discord-hidden-controls > div {
+  flex-direction: column;
+  align-items: stretch;
 }
 
 .view-switch,
@@ -578,12 +621,12 @@ h3 {
     overflow-x: visible;
   }
 
-  .chrome-hover-zone {
-    padding: 8px 12px 22px;
+  .chrome-control-rail {
+    right: 6px;
   }
 
-  .chrome-overlay-actions {
-    max-width: calc(100vw - 24px);
+  .chrome-rail-actions {
+    max-width: min(210px, calc(100vw - 42px));
   }
 
   .discord-hidden-controls {
@@ -634,7 +677,20 @@ h3 {
   background: #293139;
 }
 
-:root[data-theme='night'] .chrome-overlay-actions {
+:root[data-theme='night'] .chrome-rail-handle {
+  border-color: #3a444d;
+  background: rgba(23, 27, 31, 0.94);
+  color: #a5b0ba;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.34);
+}
+
+:root[data-theme='night'] .chrome-rail-handle:hover,
+:root[data-theme='night'] .chrome-control-rail:focus-within .chrome-rail-handle {
+  background: #1d2329;
+  color: #eef1f4;
+}
+
+:root[data-theme='night'] .chrome-rail-actions {
   border-color: #3a444d;
   background: rgba(23, 27, 31, 0.96);
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.38);

@@ -14,7 +14,7 @@ const ChromeHiddenStorageKey = 'windows-clean-notifs-chrome-hidden';
 type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'unavailable';
 type ViewMode = 'feed' | 'discord';
 type ThemeMode = 'light' | 'night';
-type DashboardControlsVariant = 'header' | 'overlay';
+type DashboardControlsVariant = 'header' | 'rail';
 
 type AppProps = {
   api?: DashboardApi;
@@ -313,10 +313,10 @@ export function App({
   return (
     <div className={chromeHidden ? 'app-shell chrome-hidden' : 'app-shell'}>
       {chromeHidden ? (
-        <div className="chrome-hover-zone" aria-label="Hidden dashboard controls">
-          <div className="chrome-overlay-toolbar">
+        <div className="chrome-control-rail" aria-label="Hidden dashboard controls">
+          <div className="chrome-rail-menu">
             <DashboardControls
-              variant="overlay"
+              variant="rail"
               discordAvailable={discordAvailable}
               activeView={activeView}
               onViewChange={setActiveView}
@@ -330,6 +330,9 @@ export function App({
               onShowAllChannels={showAllDiscordChannels}
             />
           </div>
+          <button type="button" className="chrome-rail-handle" aria-label="Show dashboard controls" title="Dashboard controls">
+            <span aria-hidden="true">⋮</span>
+          </button>
         </div>
       ) : (
         <header className="app-header">
@@ -478,7 +481,7 @@ function DashboardControls({
   onShowAllChannels
 }: DashboardControlsProps) {
   return (
-    <div className={variant === 'header' ? 'header-actions' : 'chrome-overlay-actions'}>
+    <div className={variant === 'header' ? 'header-actions' : 'chrome-rail-actions'}>
       {discordAvailable ? (
         <div className="view-switch" role="tablist" aria-label="View">
           <button
@@ -519,7 +522,7 @@ function DashboardControls({
           Night
         </button>
       </div>
-      {variant === 'overlay' && hiddenChannels.length > 0 ? (
+      {variant === 'rail' && hiddenChannels.length > 0 ? (
         <HiddenDiscordChannelsControls
           channels={hiddenChannels}
           onShowChannel={onShowChannel}
