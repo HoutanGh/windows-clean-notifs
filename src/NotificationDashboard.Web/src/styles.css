@@ -504,6 +504,185 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.trading-bot-card {
+  padding: 7px 8px 8px;
+}
+
+.trading-card-body {
+  margin-top: 5px;
+}
+
+.trading-card-head,
+.trading-symbol-row,
+.trading-chip-row,
+.trading-related > div {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.trading-card-head {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.trading-symbol-row,
+.trading-chip-row {
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.trading-time {
+  flex: 0 0 auto;
+  color: #65717c;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.trading-direction {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.direction-up {
+  background: #dff4e8;
+  color: #167548;
+}
+
+.direction-down {
+  background: #fbe3df;
+  color: #b42318;
+}
+
+.trading-ticker {
+  color: #111820;
+  font-size: 15px;
+  font-weight: 750;
+  line-height: 1.15;
+}
+
+.trading-price,
+.trading-percent {
+  color: #35414c;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.trading-percent {
+  font-weight: 650;
+}
+
+.trading-flag.fi {
+  width: 18px;
+  height: 13px;
+  flex: 0 0 auto;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(17, 24, 32, 0.16);
+}
+
+.trading-chip-row {
+  margin-top: 6px;
+}
+
+.trading-signal,
+.trading-metric {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  border-radius: 5px;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.trading-signal {
+  padding: 3px 6px;
+  background: #edf1f5;
+  color: #35414c;
+  font-weight: 650;
+}
+
+.signal-news {
+  background: #e3efff;
+  color: #1759a6;
+}
+
+.signal-filing {
+  background: #e9ecff;
+  color: #4442a0;
+}
+
+.signal-risk {
+  background: #fff0d8;
+  color: #845000;
+}
+
+.signal-up {
+  background: #dff4e8;
+  color: #167548;
+}
+
+.signal-down {
+  background: #fbe3df;
+  color: #b42318;
+}
+
+.trading-metric {
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid #dbe2e8;
+  background: #ffffff;
+  color: #65717c;
+}
+
+.trading-metric strong {
+  color: #1d2329;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.trading-related {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.trading-related > div {
+  gap: 6px;
+  color: #52606c;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.trading-related strong {
+  color: #1d2329;
+  font-size: 12px;
+}
+
+.discord-card .trading-headline,
+.discord-card .trading-note,
+.discord-card .trading-clean-text {
+  color: #1d2329;
+  font-size: 12px;
+  line-height: 1.32;
+}
+
+.discord-card .trading-headline,
+.discord-card .trading-note,
+.discord-card .trading-clean-text {
+  margin-top: 6px;
+}
+
+.discord-card .trading-note {
+  color: #52606c;
+}
+
 .sources-panel {
   position: fixed;
   inset: 76px 20px auto auto;
@@ -729,6 +908,63 @@ h3 {
 :root[data-theme='night'] .discord-card strong,
 :root[data-theme='night'] .discord-card p {
   color: #eef1f4;
+}
+
+:root[data-theme='night'] .trading-time,
+:root[data-theme='night'] .trading-price,
+:root[data-theme='night'] .trading-related > div,
+:root[data-theme='night'] .discord-card .trading-note {
+  color: #a5b0ba;
+}
+
+:root[data-theme='night'] .trading-ticker,
+:root[data-theme='night'] .trading-metric strong,
+:root[data-theme='night'] .trading-related strong,
+:root[data-theme='night'] .discord-card .trading-headline,
+:root[data-theme='night'] .discord-card .trading-clean-text {
+  color: #eef1f4;
+}
+
+:root[data-theme='night'] .trading-metric {
+  border-color: #3a444d;
+  background: #1d2329;
+  color: #a5b0ba;
+}
+
+:root[data-theme='night'] .trading-signal {
+  background: #293139;
+  color: #d8dee5;
+}
+
+:root[data-theme='night'] .direction-up,
+:root[data-theme='night'] .signal-up {
+  background: #173827;
+  color: #7ed7a5;
+}
+
+:root[data-theme='night'] .direction-down,
+:root[data-theme='night'] .signal-down {
+  background: #4a211e;
+  color: #ffb4ab;
+}
+
+:root[data-theme='night'] .signal-news {
+  background: #17324f;
+  color: #9ccaff;
+}
+
+:root[data-theme='night'] .signal-filing {
+  background: #28294f;
+  color: #c5c4ff;
+}
+
+:root[data-theme='night'] .signal-risk {
+  background: #402d12;
+  color: #ffd28a;
+}
+
+:root[data-theme='night'] .trading-flag.fi {
+  box-shadow: 0 0 0 1px rgba(238, 241, 244, 0.2);
 }
 
 :root[data-theme='night'] .view-switch button,

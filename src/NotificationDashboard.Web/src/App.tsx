@@ -1,4 +1,4 @@
-import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError, createHttpDashboardApi, type DashboardApi } from './api';
 import { createBrowserNotificationEventSource, type NotificationEventSourceFactory } from './events';
 import type { HealthResponse, NotificationItem, NotificationSource } from './types';
@@ -11,6 +11,11 @@ const ThemeStorageKey = 'windows-clean-notifs-theme';
 const HiddenDiscordChannelsStorageKey = 'windows-clean-notifs-hidden-discord-channels';
 const DiscordChannelOrderStorageKey = 'windows-clean-notifs-discord-channel-order';
 const ChromeHiddenStorageKey = 'windows-clean-notifs-chrome-hidden';
+const TradingChatChannelName = '#💰│trading-chat';
+const DiscordControlCharactersRegex = /[\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069]/g;
+const DiscordMarkdownLinkRegex = /\[([^\]]+)\]\s*(?:\(<[^>]+>\)|\([^)]*\)|<[^>]+>\)?)[⬏↗]?/g;
+const FlagTokenRegex = /:flag_([a-z]{2}):/gi;
+const MarkdownCodeSpanRegex = /`([^`]+)`/g;
 
 type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'unavailable';
 type ViewMode = 'feed' | 'discord';
@@ -29,6 +34,57 @@ type DiscordChannelGroup = {
   latestId: number;
   notifications: NotificationItem[];
 };
+
+type TradingMetric = {
+  label: string;
+  value: string;
+};
+
+type TradingRelatedItem = {
+  label: string;
+  age: string;
+  value: string;
+};
+
+type TradingBotMessage =
+  | {
+    kind: 'scanner';
+    time: string;
+    direction: string;
+    ticker: string;
+    price: string;
+    percent: string | null;
+    sequence: string | null;
+    trigger: string | null;
+    countryCode: string | null;
+    signals: string[];
+    metrics: TradingMetric[];
+    related: TradingRelatedItem[];
+    notes: string[];
+  }
+  | {
+    kind: 'halt';
+    time: string;
+    ticker: string;
+    status: string;
+    reason: string | null;
+    price: string | null;
+    volume: string | null;
+  }
+  | {
+    kind: 'pressRelease';
+    ticker: string;
+    price: string;
+    headline: string;
+    countryCode: string | null;
+    signal: string;
+    signals: string[];
+    metrics: TradingMetric[];
+  }
+  | {
+    kind: 'fallback';
+    text: string;
+  };
 
 type DashboardControlsProps = {
   variant: DashboardControlsVariant;
@@ -688,18 +744,471 @@ function DiscordNotificationCard({ notification }: { notification: NotificationI
   const sender = normalizeGroupLabel(notification.discord?.sender)
     ?? normalizeGroupLabel(notification.primaryText)
     ?? notification.sourceApp;
+  const tradingMessage = parseTradingBotMessage(notification, sender);
 
   return (
-    <li className="discord-card" data-testid="discord-notification-card" data-id={notification.id}>
+    <li
+      className={tradingMessage ? 'discord-card trading-bot-card' : 'discord-card'}
+      data-testid="discord-notification-card"
+      data-id={notification.id}
+    >
       <div className="discord-card-meta">
         <strong>{sender}</strong>
         <time dateTime={notification.timestamp}>{formatCompactTimestamp(notification.timestamp)}</time>
       </div>
-      {isPresent(notification.messageText) ? (
+      {tradingMessage ? (
+        <TradingBotMessageView message={tradingMessage} />
+      ) : isPresent(notification.messageText) ? (
         <p>{notification.messageText}</p>
       ) : null}
     </li>
   );
+}
+
+function TradingBotMessageView({ message }: { message: TradingBotMessage }) {
+  if (message.kind === 'scanner') {
+    return (
+      <div className="trading-card-body">
+        <div className="trading-card-head">
+          <div className="trading-symbol-row">
+            <span className={`trading-direction ${formatTradingDirectionClass(message.direction)}`}>
+              {message.direction}
+            </span>
+            <strong className="trading-ticker">{message.ticker}</strong>
+            <span className="trading-price">&lt; {message.price}</span>
+            {message.percent ? <span className="trading-percent">{message.percent}</span> : null}
+            <TradingFlag countryCode={message.countryCode} />
+          </div>
+          <span className="trading-time">{message.time}</span>
+        </div>
+        <TradingChipRow
+          signals={[
+            message.sequence,
+            message.trigger,
+            ...message.signals
+          ]}
+          metrics={message.metrics}
+        />
+        {message.related.length > 0 ? (
+          <div className="trading-related" aria-label="Related trading signals">
+            {message.related.map((item) => (
+              <div key={`${item.label}-${item.age}-${item.value}`}>
+                <span className="trading-signal signal-filing">{item.label}</span>
+                <span>{item.age}</span>
+                <strong>{item.value}</strong>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {message.notes.length > 0 ? (
+          <p className="trading-note">{message.notes.join('\n')}</p>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (message.kind === 'halt') {
+    return (
+      <div className="trading-card-body">
+        <div className="trading-card-head">
+          <div className="trading-symbol-row">
+            <strong className="trading-ticker">{message.ticker}</strong>
+            <span className={`trading-signal ${formatHaltSignalClass(message.status)}`}>
+              {message.status}
+            </span>
+          </div>
+          <span className="trading-time">{message.time}</span>
+        </div>
+        <TradingChipRow
+          signals={[message.reason]}
+          metrics={[
+            message.price ? { label: 'Price', value: message.price } : null,
+            message.volume ? { label: 'Vol', value: message.volume } : null
+          ]}
+        />
+      </div>
+    );
+  }
+
+  if (message.kind === 'pressRelease') {
+    return (
+      <div className="trading-card-body">
+        <div className="trading-card-head">
+          <div className="trading-symbol-row">
+            <strong className="trading-ticker">{message.ticker}</strong>
+            <span className="trading-price">&lt; {message.price}</span>
+            <span className="trading-signal signal-news">{message.signal}</span>
+            <TradingFlag countryCode={message.countryCode} />
+          </div>
+        </div>
+        <p className="trading-headline">{message.headline}</p>
+        <TradingChipRow signals={message.signals} metrics={message.metrics} />
+      </div>
+    );
+  }
+
+  return (
+    <p className="trading-clean-text">{renderTextWithFlags(message.text)}</p>
+  );
+}
+
+function TradingFlag({ countryCode }: { countryCode: string | null }) {
+  if (!countryCode || !/^[a-z]{2}$/i.test(countryCode)) {
+    return null;
+  }
+
+  const normalizedCode = countryCode.toLowerCase();
+  const label = `${normalizedCode.toUpperCase()} flag`;
+
+  return (
+    <span
+      className={`trading-flag fi fi-${normalizedCode}`}
+      aria-label={label}
+      title={label}
+    />
+  );
+}
+
+function TradingChipRow({
+  signals,
+  metrics
+}: {
+  signals: Array<string | null>;
+  metrics?: Array<TradingMetric | null>;
+}) {
+  const visibleSignals = uniqueStrings(signals.filter(isPresent));
+  const visibleMetrics = (metrics ?? []).filter((metric): metric is TradingMetric => (
+    metric !== null && isPresent(metric.label) && isPresent(metric.value)
+  ));
+
+  if (visibleSignals.length === 0 && visibleMetrics.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="trading-chip-row">
+      {visibleSignals.map((signal) => (
+        <span key={`signal-${signal}`} className={`trading-signal ${formatTradingSignalClass(signal)}`}>
+          {signal}
+        </span>
+      ))}
+      {visibleMetrics.map((metric) => (
+        <span key={`metric-${metric.label}-${metric.value}`} className="trading-metric">
+          <span>{metric.label}</span>
+          <strong>{metric.value}</strong>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function parseTradingBotMessage(notification: NotificationItem, sender: string): TradingBotMessage | null {
+  if (!isTradingBotNotification(notification, sender) || !isPresent(notification.messageText)) {
+    return null;
+  }
+
+  const text = normalizeDiscordText(notification.messageText);
+  return parseScannerAlert(text)
+    ?? parseHaltAlert(text)
+    ?? parsePressReleaseAlert(text, sender)
+    ?? {
+      kind: 'fallback',
+      text: cleanDiscordMarkdownText(text)
+    };
+}
+
+function isTradingBotNotification(notification: NotificationItem, sender: string): boolean {
+  const channel = normalizeDiscordText(notification.discord?.channel ?? '');
+  return channel === TradingChatChannelName && sender.startsWith('NuntioBot');
+}
+
+function parseScannerAlert(text: string): TradingBotMessage | null {
+  const [primaryLine = '', ...extraLines] = text.split('\n');
+  const match = /^`(?<time>\d{1,2}:\d{2})`\s+(?<direction>[↑↗↓↘→])\s+\*\*(?<ticker>[A-Z.]{1,7})\*\*\s+<\s+(?<price>\$\.?\d+(?:\.\d+)?c?)\s*(?<rest>.*)$/u.exec(primaryLine);
+  if (!match?.groups) {
+    return null;
+  }
+
+  const rest = match.groups.rest.trim();
+  const countryMatch = /:flag_(?<countryCode>[a-z]{2}):/i.exec(rest);
+  const beforeCountry = countryMatch ? rest.slice(0, countryMatch.index) : rest;
+  const detailText = countryMatch
+    ? rest.slice(countryMatch.index + countryMatch[0].length)
+    : rest.includes('|')
+      ? rest.slice(rest.indexOf('|'))
+      : '';
+  const percent = /`(?<percent>-?\d+(?:\.\d+)?%)`/.exec(beforeCountry)?.groups?.percent ?? null;
+  const sequence = /(?:^|\s)·\s*(?<sequence>\d+)/.exec(beforeCountry)?.groups?.sequence ?? null;
+  const trigger = [...beforeCountry.matchAll(MarkdownCodeSpanRegex)]
+    .map((span) => cleanInlineText(span[1]))
+    .find((span) => span !== percent) ?? null;
+  const details = parseTradingDetails(detailText);
+  const related: TradingRelatedItem[] = [];
+  const notes: string[] = [];
+
+  for (const line of extraLines) {
+    const relatedItem = parseRelatedSecLine(line);
+    if (relatedItem) {
+      related.push(relatedItem);
+      continue;
+    }
+
+    const cleanedLine = cleanDiscordMarkdownText(line.replace(/^>\s*\*?\s*/, ''));
+    if (cleanedLine) {
+      notes.push(cleanedLine);
+    }
+  }
+
+  return {
+    kind: 'scanner',
+    time: match.groups.time,
+    direction: match.groups.direction,
+    ticker: match.groups.ticker,
+    price: match.groups.price,
+    percent,
+    sequence,
+    trigger,
+    countryCode: countryMatch?.groups?.countryCode.toLowerCase() ?? null,
+    signals: details.signals,
+    metrics: details.metrics,
+    related,
+    notes: uniqueStrings([...details.notes, ...notes])
+  };
+}
+
+function parseHaltAlert(text: string): TradingBotMessage | null {
+  const match = /^`(?<time>\d{1,2}:\d{2}:\d{2})`\s+\*\*(?<ticker>[A-Z.]{1,7})\*\*\s+`(?<status>Halted(?:\s+(?:UP|DOWN))?)`\s*(?:\|\s*(?<details>.*))?$/u.exec(text);
+  if (!match?.groups) {
+    return null;
+  }
+
+  const details = cleanDiscordMarkdownText(match.groups.details ?? '');
+  const detailMatch = /^(?<reason>.+?)(?:\s*→\s*(?<price>\$\.?\d+(?:\.\d+)?c?)\s*~\s*(?<volume>.+?)\s+vol)?$/.exec(details);
+
+  return {
+    kind: 'halt',
+    time: match.groups.time,
+    ticker: match.groups.ticker,
+    status: match.groups.status,
+    reason: detailMatch?.groups?.reason?.trim() ?? null,
+    price: detailMatch?.groups?.price ?? null,
+    volume: detailMatch?.groups?.volume ?? null
+  };
+}
+
+function parsePressReleaseAlert(text: string, sender: string): TradingBotMessage | null {
+  const match = /^\*\*(?<ticker>[A-Z.]{1,7})\*\*\s+<\s+(?<price>\$\.?\d+(?:\.\d+)?c?)\s+-\s+(?<rest>[\s\S]+)$/u.exec(text);
+  if (!match?.groups) {
+    return null;
+  }
+
+  const countryMatch = /\s+~\s+:flag_(?<countryCode>[a-z]{2}):/i.exec(match.groups.rest);
+  if (!countryMatch?.groups) {
+    return null;
+  }
+
+  const headline = cleanDiscordMarkdownText(match.groups.rest.slice(0, countryMatch.index));
+  const details = parseTradingDetails(match.groups.rest.slice(countryMatch.index + countryMatch[0].length));
+
+  return {
+    kind: 'pressRelease',
+    ticker: match.groups.ticker,
+    price: match.groups.price,
+    headline,
+    countryCode: countryMatch.groups.countryCode.toLowerCase(),
+    signal: sender.includes('DROP') ? 'PR Drop' : 'PR Spike',
+    signals: details.signals,
+    metrics: details.metrics
+  };
+}
+
+function parseTradingDetails(text: string): { signals: string[]; metrics: TradingMetric[]; notes: string[] } {
+  const signals: string[] = [];
+  const metrics: TradingMetric[] = [];
+  const notes: string[] = [];
+
+  for (const segment of text.split('|')) {
+    for (const rawPart of segment.split('\n')) {
+      signals.push(...extractVisibleLinkedLabels(rawPart));
+
+      for (const codeSpan of rawPart.matchAll(MarkdownCodeSpanRegex)) {
+        const signal = cleanInlineText(codeSpan[1]);
+        if (signal && !/^-?\d+(?:\.\d+)?%$/.test(signal)) {
+          signals.push(signal);
+        }
+      }
+
+      const part = cleanDiscordMarkdownText(rawPart)
+        .replace(/^>\s*/, '')
+        .replace(/^\*\s*/, '')
+        .replace(/^~\s*/, '')
+        .trim();
+      if (!part || shouldHideLinkLabel(part)) {
+        continue;
+      }
+
+      const metricMatch = /^(?<label>[A-Za-z][A-Za-z0-9 +/%.-]{0,20}):\s*(?<value>.+)$/.exec(part);
+      if (metricMatch?.groups) {
+        metrics.push({
+          label: metricMatch.groups.label,
+          value: metricMatch.groups.value
+        });
+        continue;
+      }
+
+      if (!extractVisibleLinkedLabels(rawPart).includes(part) && !rawPart.includes('`')) {
+        notes.push(part);
+      }
+    }
+  }
+
+  return {
+    signals: uniqueStrings(signals),
+    metrics,
+    notes: uniqueStrings(notes)
+  };
+}
+
+function parseRelatedSecLine(line: string): TradingRelatedItem | null {
+  const cleaned = normalizeDiscordText(line)
+    .replace(/^>\s*/, '')
+    .replace(/^\*\s*/, '')
+    .trim();
+  const match = /^(?<age>(?:an|\d+)\s+(?:minute|minutes|hour|hours|day|days) ago)\s+`?SEC`?\s+Form\s+(?<form>[A-Z0-9-]+)/i.exec(cleaned);
+  if (!match?.groups) {
+    return null;
+  }
+
+  return {
+    label: 'SEC',
+    age: compactRelativeAge(match.groups.age),
+    value: match.groups.form
+  };
+}
+
+function compactRelativeAge(value: string): string {
+  const normalized = value.toLowerCase();
+  const amount = normalized.startsWith('an ') ? '1' : normalized.match(/\d+/)?.[0] ?? '';
+  if (normalized.includes('minute')) {
+    return `${amount}m ago`;
+  }
+
+  if (normalized.includes('hour')) {
+    return `${amount}h ago`;
+  }
+
+  if (normalized.includes('day')) {
+    return `${amount}d ago`;
+  }
+
+  return value;
+}
+
+function normalizeDiscordText(value: string): string {
+  return value
+    .replace(DiscordControlCharactersRegex, '')
+    .replace(/\r\n?/g, '\n')
+    .trim();
+}
+
+function cleanDiscordMarkdownText(value: string): string {
+  return normalizeDiscordText(value)
+    .replace(DiscordMarkdownLinkRegex, (_match, label: string) => {
+      const cleanedLabel = cleanInlineText(label);
+      return shouldHideLinkLabel(cleanedLabel) ? '' : cleanedLabel;
+    })
+    .replace(/```/g, '')
+    .replace(/\*\*/g, '')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/<https?:\/\/[^>\s]+>/g, '')
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/\s+⬏/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/[ \t]*\n[ \t]*/g, '\n')
+    .trim();
+}
+
+function cleanInlineText(value: string | undefined): string {
+  return normalizeDiscordText(value ?? '')
+    .replace(/\*\*/g, '')
+    .replace(/`/g, '')
+    .trim();
+}
+
+function extractVisibleLinkedLabels(value: string): string[] {
+  return [...value.matchAll(DiscordMarkdownLinkRegex)]
+    .map((match) => cleanInlineText(match[1]))
+    .filter((label) => isPresent(label) && !shouldHideLinkLabel(label));
+}
+
+function shouldHideLinkLabel(label: string): boolean {
+  return /^-?\s*Link$/i.test(label);
+}
+
+function renderTextWithFlags(value: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+
+  for (const match of value.matchAll(FlagTokenRegex)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) {
+      nodes.push(value.slice(lastIndex, index));
+    }
+
+    nodes.push(<TradingFlag key={`${match[1]}-${index}`} countryCode={match[1].toLowerCase()} />);
+    lastIndex = index + match[0].length;
+  }
+
+  if (lastIndex < value.length) {
+    nodes.push(value.slice(lastIndex));
+  }
+
+  return nodes;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (!seen.has(value)) {
+      result.push(value);
+      seen.add(value);
+    }
+  }
+
+  return result;
+}
+
+function formatTradingDirectionClass(direction: string): string {
+  return direction === '↓' || direction === '↘' ? 'direction-down' : 'direction-up';
+}
+
+function formatHaltSignalClass(status: string): string {
+  if (status.includes('DOWN')) {
+    return 'signal-down';
+  }
+
+  if (status.includes('UP')) {
+    return 'signal-up';
+  }
+
+  return 'signal-neutral';
+}
+
+function formatTradingSignalClass(signal: string): string {
+  if (signal === 'PR' || signal === 'PR+' || signal.startsWith('PR ')) {
+    return 'signal-news';
+  }
+
+  if (signal === 'SEC') {
+    return 'signal-filing';
+  }
+
+  if (signal.includes('CTB') || signal === 'Reg SHO') {
+    return 'signal-risk';
+  }
+
+  return 'signal-neutral';
 }
 
 function StateMessage({ title, detail }: { title: string; detail?: string }) {
