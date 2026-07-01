@@ -291,6 +291,77 @@ describe('App', () => {
     expect(screen.queryByRole('tab', { name: 'Main Chat' })).not.toBeInTheDocument();
   });
 
+  test('keeps Discord channel columns stable when newer notifications arrive', async () => {
+    const events = createFakeEventSourceFactory();
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(42, 'Main Chat', '#stocks-and-options', 'Trader Bot', 'NVDA breaking premarket high'),
+        discordNotification(41, 'Main Chat', '#main', 'Alice', 'Morning all')
+      ])
+    });
+
+    renderApp(api, events.factory);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+    await waitFor(() => expect(events.sources).toHaveLength(1));
+
+    expect(discordColumnNames()).toEqual(['#stocks-and-options', '#main']);
+    await waitFor(() => expect(readDiscordChannelOrderKeys()).toEqual([
+      discordChannelKey('Main Chat', '#stocks-and-options'),
+      discordChannelKey('Main Chat', '#main')
+    ]));
+
+    act(() => {
+      events.sources[0].emit(discordNotification(43, 'Main Chat', '#main', 'Alice', 'Newest in main'));
+    });
+
+    expect(await screen.findByText('Newest in main')).toBeInTheDocument();
+    expect(discordColumnNames()).toEqual(['#stocks-and-options', '#main']);
+  });
+
+  test('appends newly appearing Discord channels to the right', async () => {
+    const events = createFakeEventSourceFactory();
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(42, 'Main Chat', '#stocks-and-options', 'Trader Bot', 'NVDA breaking premarket high'),
+        discordNotification(41, 'Main Chat', '#main', 'Alice', 'Morning all')
+      ])
+    });
+
+    renderApp(api, events.factory);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+    await waitFor(() => expect(events.sources).toHaveLength(1));
+
+    expect(discordColumnNames()).toEqual(['#stocks-and-options', '#main']);
+
+    act(() => {
+      events.sources[0].emit(discordNotification(43, 'Main Chat', '#alerts', 'Scanner', 'TSLA alert'));
+    });
+
+    expect(await screen.findByRole('heading', { name: '#alerts' })).toBeInTheDocument();
+    expect(discordColumnNames()).toEqual(['#stocks-and-options', '#main', '#alerts']);
+  });
+
+  test('loads Discord channel column order from browser storage', async () => {
+    window.localStorage.setItem(
+      'windows-clean-notifs-discord-channel-order',
+      JSON.stringify([
+        discordChannelKey('Main Chat', '#main'),
+        discordChannelKey('Main Chat', '#stocks-and-options')
+      ])
+    );
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(42, 'Main Chat', '#stocks-and-options', 'Trader Bot', 'NVDA breaking premarket high'),
+        discordNotification(41, 'Main Chat', '#main', 'Alice', 'Morning all')
+      ])
+    });
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+
+    expect(discordColumnNames()).toEqual(['#main', '#stocks-and-options']);
+  });
+
   test('hides and restores Discord channel columns locally', async () => {
     const api = createApi({
       getNotifications: vi.fn().mockResolvedValue([
@@ -485,6 +556,20 @@ function source(displayName: string, appId: string, enabled: boolean): Notificat
 
 function readHiddenDiscordChannelKeys(): string[] {
   return JSON.parse(window.localStorage.getItem('windows-clean-notifs-hidden-discord-channels') ?? '[]') as string[];
+}
+
+function readDiscordChannelOrderKeys(): string[] {
+  return JSON.parse(window.localStorage.getItem('windows-clean-notifs-discord-channel-order') ?? '[]') as string[];
+}
+
+function discordChannelKey(context: string, channel: string): string {
+  return JSON.stringify([context, channel]);
+}
+
+function discordColumnNames(): string[] {
+  return screen.getAllByTestId('discord-channel-column').map((column) => (
+    column.querySelector('h3')?.textContent ?? ''
+  ));
 }
 
 function createFakeEventSourceFactory() {
