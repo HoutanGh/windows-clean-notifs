@@ -429,6 +429,7 @@ The dashboard is a compact single page with:
 
 - a merged newest-first feed from enabled sources;
 - an optional Discord view with channel columns when Discord is enabled;
+- browser-local stable ordering for Discord channel columns;
 - browser-local hide/show controls for Discord channel columns;
 - a browser-local hidden-controls mode that reveals dashboard controls from a small right-edge hover/focus rail;
 - explicit Light and Night theme controls stored in browser local storage;

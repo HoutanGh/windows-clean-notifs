@@ -97,6 +97,7 @@ Layout:
 
 - Discord channels appear as columns.
 - Each column shows newest-first notifications for that channel.
+- Discord column order is stable in the browser; newly seen channels append to the end instead of reordering existing columns.
 - Individual Discord columns can be hidden and restored as a browser-local display preference.
 - Direct messages, group DMs, or unparsable Discord notifications appear in an **Ungrouped** or equivalent fallback area.
 - Switching view modes does not change source selection, storage, retention, or notification capture.
