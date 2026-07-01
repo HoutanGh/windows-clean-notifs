@@ -56,7 +56,7 @@ The app has a generic notification view and may have source-aware enhanced views
 
 The dashboard supports explicit **Light** and **Night** visual modes. The selected theme is stored locally in the browser and does not affect notification capture, source selection, storage, retention, or API behaviour.
 
-The dashboard can hide persistent page controls as a browser-local display preference. In this mode, the notification surface uses the page directly and the controls are available from a hover/focus overlay at the top edge. This does not create another notification view and does not affect capture, source selection, storage, retention, or API behaviour.
+The dashboard can hide persistent page controls as a browser-local display preference. In this mode, the notification surface uses the page directly and the controls are available from a small right-edge hover/focus rail. This does not create another notification view and does not affect capture, source selection, storage, retention, or API behaviour.
 
 ### Generic Feed
 
