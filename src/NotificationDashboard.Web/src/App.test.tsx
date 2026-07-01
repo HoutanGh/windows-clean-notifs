@@ -240,7 +240,7 @@ describe('App', () => {
     expect(window.localStorage.getItem('windows-clean-notifs-theme')).toBe('light');
   });
 
-  test('hides and restores dashboard controls from the top overlay', async () => {
+  test('hides and restores dashboard controls from the right rail', async () => {
     const api = createApi();
 
     renderApp(api);
@@ -249,6 +249,7 @@ describe('App', () => {
 
     expect(screen.queryByRole('banner')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Hidden dashboard controls')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show dashboard controls' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Show controls' })).toBeInTheDocument();
     expect(window.localStorage.getItem('windows-clean-notifs-chrome-hidden')).toBe('true');
 
@@ -337,7 +338,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Show #main in Main Chat' })).toBeInTheDocument();
   });
 
-  test('moves hidden Discord channel restore controls into hidden-controls overlay', async () => {
+  test('moves hidden Discord channel restore controls into the hidden-controls rail', async () => {
     const api = createApi({
       getNotifications: vi.fn().mockResolvedValue([
         discordNotification(42, 'Main Chat', '#stocks-and-options', 'Trader Bot', 'NVDA breaking premarket high'),
