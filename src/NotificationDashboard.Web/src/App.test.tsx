@@ -240,6 +240,34 @@ describe('App', () => {
     expect(window.localStorage.getItem('windows-clean-notifs-theme')).toBe('light');
   });
 
+  test('hides and restores dashboard controls from the top overlay', async () => {
+    const api = createApi();
+
+    renderApp(api);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Hide controls' }));
+
+    expect(screen.queryByRole('banner')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Hidden dashboard controls')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show controls' })).toBeInTheDocument();
+    expect(window.localStorage.getItem('windows-clean-notifs-chrome-hidden')).toBe('true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show controls' }));
+
+    expect(await screen.findByRole('banner')).toBeInTheDocument();
+    expect(window.localStorage.getItem('windows-clean-notifs-chrome-hidden')).toBe('false');
+  });
+
+  test('loads hidden dashboard controls from browser storage', async () => {
+    window.localStorage.setItem('windows-clean-notifs-chrome-hidden', 'true');
+    const api = createApi();
+
+    renderApp(api);
+
+    expect(screen.queryByRole('banner')).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Show controls' })).toBeInTheDocument();
+  });
+
   test('renders Discord view with channel columns', async () => {
     const api = createApi({
       getNotifications: vi.fn().mockResolvedValue([
@@ -307,6 +335,31 @@ describe('App', () => {
     expect(screen.queryByText('Morning all')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '#stocks-and-options' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Show #main in Main Chat' })).toBeInTheDocument();
+  });
+
+  test('moves hidden Discord channel restore controls into hidden-controls overlay', async () => {
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(42, 'Main Chat', '#stocks-and-options', 'Trader Bot', 'NVDA breaking premarket high'),
+        discordNotification(41, 'Main Chat', '#main', 'Alice', 'Morning all')
+      ])
+    });
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Hide #main in Main Chat' }));
+
+    expect(screen.getByText('Hidden channels')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide controls' }));
+
+    expect(screen.queryByText('Hidden channels')).not.toBeInTheDocument();
+    expect(screen.getByText('Hidden 1')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show #main in Main Chat' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show #main in Main Chat' }));
+
+    expect(await screen.findByRole('heading', { name: '#main' })).toBeInTheDocument();
   });
 
   test('shows all hidden Discord channel columns at once', async () => {
