@@ -291,6 +291,64 @@ describe('App', () => {
     expect(screen.queryByRole('tab', { name: 'Main Chat' })).not.toBeInTheDocument();
   });
 
+  test('formats trading bot SEC context without exposing the link URL', async () => {
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(
+          71,
+          '📊 MAIN CHATS',
+          '#💰│trading-chat',
+          'NuntioBot',
+          '`16:06` ↑ **SURG** < $.50c ~ :flag_us: | **Float**: 16.0 M | **IO**: 8.77% | **MC**: 10.4 M\n> * 2 minutes ago `SEC` Form 8-K [- Link](<https://www.sec.gov/Archives/edgar/data/1392694/000149315226031540/0001493152-26-031540-index.htm>)'
+        )
+      ])
+    });
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+
+    expect(await screen.findByText('SURG')).toBeInTheDocument();
+    expect(screen.getByLabelText('US flag')).toBeInTheDocument();
+    expect(screen.getByText('Float')).toBeInTheDocument();
+    expect(screen.getByText('16.0 M')).toBeInTheDocument();
+    expect(screen.getByText('IO')).toBeInTheDocument();
+    expect(screen.getByText('8.77%')).toBeInTheDocument();
+    expect(screen.getByText('MC')).toBeInTheDocument();
+    expect(screen.getByText('10.4 M')).toBeInTheDocument();
+    expect(screen.getByText('SEC')).toBeInTheDocument();
+    expect(screen.getByText('2m ago')).toBeInTheDocument();
+    expect(screen.getByText('8-K')).toBeInTheDocument();
+    expect(screen.queryByText('RVol')).not.toBeInTheDocument();
+    expect(screen.queryByText(/sec\.gov/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Link/)).not.toBeInTheDocument();
+  });
+
+  test('keeps present RVol and collapses trading bot PR links to labels', async () => {
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(
+          72,
+          '📊 MAIN CHATS',
+          '#💰│trading-chat',
+          'NuntioBot',
+          '`15:41` ↑ **LHAI** < $3 `221%` · 15 `NHOD` ~ :flag_us: | **Float**: 8.1 M | **RVol**: 1,300x | **Vol**: 289 M | `High CTB` | [`PR`](<https://discord.com/channels/979306667319656479/979306670566015052/1521847865557778664>)⬏'
+        )
+      ])
+    });
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+
+    expect(await screen.findByText('LHAI')).toBeInTheDocument();
+    expect(screen.getByText('221%')).toBeInTheDocument();
+    expect(screen.getByText('NHOD')).toBeInTheDocument();
+    expect(screen.getByText('RVol')).toBeInTheDocument();
+    expect(screen.getByText('1,300x')).toBeInTheDocument();
+    expect(screen.getByText('High CTB')).toBeInTheDocument();
+    expect(screen.getByText('PR')).toBeInTheDocument();
+    expect(screen.queryByText(/discord\.com/)).not.toBeInTheDocument();
+  });
+
   test('keeps Discord channel columns stable when newer notifications arrive', async () => {
     const events = createFakeEventSourceFactory();
     const api = createApi({
