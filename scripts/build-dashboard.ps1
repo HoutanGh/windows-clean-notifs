@@ -48,15 +48,11 @@ function Invoke-External {
     $command = @((ConvertTo-CmdArgument $FilePath)) + ($Arguments | ForEach-Object { ConvertTo-CmdArgument $_ })
     $commandLine = "set `"PATH=$env:PATH`" && pushd $(ConvertTo-CmdArgument $WorkingDirectory) && $($command -join ' ') & set COMMAND_EXIT=%ERRORLEVEL% & popd & exit /b %COMMAND_EXIT%"
 
-    $process = Start-Process `
-        -FilePath "$env:ComSpec" `
-        -ArgumentList @("/d", "/s", "/c", $commandLine) `
-        -NoNewWindow `
-        -Wait `
-        -PassThru
+    & $env:ComSpec /d /s /c $commandLine
+    $exitCode = $LASTEXITCODE
 
-    if ($process.ExitCode -ne 0) {
-        throw "$FilePath $($Arguments -join ' ') failed with exit code $($process.ExitCode)."
+    if ($exitCode -ne 0) {
+        throw "$FilePath $($Arguments -join ' ') failed with exit code $exitCode."
     }
 }
 
@@ -71,15 +67,11 @@ function Invoke-WslCommand {
 
     $wsl = Resolve-Tool -Name "wsl.exe"
     $argumentLine = "wsl.exe -d $Distro -- bash -lc $(ConvertTo-CmdArgument $Command)"
-    $process = Start-Process `
-        -FilePath "$env:ComSpec" `
-        -ArgumentList @("/d", "/c", $argumentLine) `
-        -NoNewWindow `
-        -Wait `
-        -PassThru
+    & $env:ComSpec /d /c $argumentLine
+    $exitCode = $LASTEXITCODE
 
-    if ($process.ExitCode -ne 0) {
-        throw "wsl.exe -d $Distro -- bash -lc $Command failed with exit code $($process.ExitCode)."
+    if ($exitCode -ne 0) {
+        throw "wsl.exe -d $Distro -- bash -lc $Command failed with exit code $exitCode."
     }
 }
 
