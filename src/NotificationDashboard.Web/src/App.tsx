@@ -82,6 +82,22 @@ type TradingBotMessage =
     metrics: TradingMetric[];
   }
   | {
+    kind: 'secFiling';
+    time: string;
+    ticker: string;
+    form: string;
+  }
+  | {
+    kind: 'marketStatus';
+    text: string;
+  }
+  | {
+    kind: 'newsHeadline';
+    ticker: string;
+    headline: string;
+    age: string | null;
+  }
+  | {
     kind: 'fallback';
     text: string;
   };
@@ -847,6 +863,48 @@ function TradingBotMessageView({ message }: { message: TradingBotMessage }) {
     );
   }
 
+  if (message.kind === 'secFiling') {
+    return (
+      <div className="trading-card-body">
+        <div className="trading-card-head">
+          <div className="trading-symbol-row">
+            <strong className="trading-ticker">{message.ticker}</strong>
+            <span className="trading-signal signal-filing">SEC</span>
+            <span className="trading-price">{message.form}</span>
+          </div>
+          <span className="trading-time">{message.time}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (message.kind === 'marketStatus') {
+    return (
+      <div className="trading-card-body">
+        <div className="trading-card-head">
+          <div className="trading-symbol-row">
+            <span className="trading-signal signal-neutral">{message.text}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (message.kind === 'newsHeadline') {
+    return (
+      <div className="trading-card-body">
+        <div className="trading-card-head">
+          <div className="trading-symbol-row">
+            <strong className="trading-ticker">{message.ticker}</strong>
+            <span className="trading-signal signal-news">News</span>
+          </div>
+          {message.age ? <span className="trading-time">{message.age}</span> : null}
+        </div>
+        <p className="trading-headline">{message.headline}</p>
+      </div>
+    );
+  }
+
   return (
     <p className="trading-clean-text">{renderTextWithFlags(message.text)}</p>
   );
@@ -911,6 +969,9 @@ function parseTradingBotMessage(notification: NotificationItem, sender: string):
   return parseScannerAlert(text)
     ?? parseHaltAlert(text)
     ?? parsePressReleaseAlert(text, sender)
+    ?? parseStandaloneSecFiling(text)
+    ?? parseMarketStatus(text)
+    ?? parseNewsHeadline(text)
     ?? {
       kind: 'fallback',
       text: cleanDiscordMarkdownText(text)
@@ -947,7 +1008,7 @@ function parseScannerAlert(text: string): TradingBotMessage | null {
   const notes: string[] = [];
 
   for (const line of extraLines) {
-    const relatedItem = parseRelatedSecLine(line);
+    const relatedItem = parseRelatedLine(line);
     if (relatedItem) {
       related.push(relatedItem);
       continue;
@@ -1002,23 +1063,90 @@ function parsePressReleaseAlert(text: string, sender: string): TradingBotMessage
     return null;
   }
 
-  const countryMatch = /\s+~\s+:flag_(?<countryCode>[a-z]{2}):/i.exec(match.groups.rest);
-  if (!countryMatch?.groups) {
-    return null;
-  }
+  const detailMatch = /\s+~\s+(?::flag_(?<countryCode>[a-z]{2}):\s*)?/i.exec(match.groups.rest);
+  const headlineText = detailMatch
+    ? match.groups.rest.slice(0, detailMatch.index)
+    : match.groups.rest;
+  const detailText = detailMatch
+    ? match.groups.rest.slice(detailMatch.index + detailMatch[0].length)
+    : '';
 
-  const headline = cleanDiscordMarkdownText(match.groups.rest.slice(0, countryMatch.index));
-  const details = parseTradingDetails(match.groups.rest.slice(countryMatch.index + countryMatch[0].length));
+  const headline = cleanDiscordMarkdownText(headlineText);
+  const details = parseTradingDetails(detailText);
 
   return {
     kind: 'pressRelease',
     ticker: match.groups.ticker,
     price: match.groups.price,
     headline,
-    countryCode: countryMatch.groups.countryCode.toLowerCase(),
+    countryCode: detailMatch?.groups?.countryCode?.toLowerCase() ?? null,
     signal: sender.includes('DROP') ? 'PR Drop' : 'PR Spike',
     signals: details.signals,
     metrics: details.metrics
+  };
+}
+
+function parseStandaloneSecFiling(text: string): TradingBotMessage | null {
+  const match = /^`(?<time>\d{1,2}:\d{2})`\s+`SEC`\s+\*\*(?<ticker>[A-Z.]{1,7})\*\*\s+-\s+`Form\s+(?<form>[A-Z0-9-]+)`/u.exec(text);
+  if (!match?.groups) {
+    return null;
+  }
+
+  return {
+    kind: 'secFiling',
+    time: match.groups.time,
+    ticker: match.groups.ticker,
+    form: match.groups.form
+  };
+}
+
+function parseMarketStatus(text: string): TradingBotMessage | null {
+  if (/^Market Open\s*:bell:\s*$/i.test(text) || /^Market Open\s*<t:\d+:R>\s*$/i.test(text)) {
+    return {
+      kind: 'marketStatus',
+      text: 'Market Open'
+    };
+  }
+
+  const openInMatch = /^Market Open in (?<minutes>\d+) minutes?$/i.exec(text);
+  if (openInMatch?.groups) {
+    return {
+      kind: 'marketStatus',
+      text: `Market opens in ${openInMatch.groups.minutes}m`
+    };
+  }
+
+  if (/^Market Closed/i.test(text)) {
+    return {
+      kind: 'marketStatus',
+      text: cleanDiscordMarkdownText(text)
+    };
+  }
+
+  return null;
+}
+
+function parseNewsHeadline(text: string): TradingBotMessage | null {
+  const timedMatch = /^(?<ticker>[A-Z.]{1,7})\s+-\s+<t:(?<timestamp>\d+):R>\s+(?<headline>[\s\S]+?)\s*(?:\/\s*)?\[Link\]/u.exec(text);
+  if (timedMatch?.groups) {
+    return {
+      kind: 'newsHeadline',
+      ticker: timedMatch.groups.ticker,
+      headline: cleanDiscordMarkdownText(timedMatch.groups.headline),
+      age: formatDiscordRelativeTimestamp(timedMatch.groups.timestamp)
+    };
+  }
+
+  const plainMatch = /^(?<ticker>[A-Z.]{1,7})\s+-\s+(?<headline>[\s\S]+?)\s*\[Link\]/u.exec(text);
+  if (!plainMatch?.groups) {
+    return null;
+  }
+
+  return {
+    kind: 'newsHeadline',
+    ticker: plainMatch.groups.ticker,
+    headline: cleanDiscordMarkdownText(plainMatch.groups.headline),
+    age: null
   };
 }
 
@@ -1069,26 +1197,35 @@ function parseTradingDetails(text: string): { signals: string[]; metrics: Tradin
   };
 }
 
-function parseRelatedSecLine(line: string): TradingRelatedItem | null {
+function parseRelatedLine(line: string): TradingRelatedItem | null {
   const cleaned = normalizeDiscordText(line)
     .replace(/^>\s*/, '')
     .replace(/^\*\s*/, '')
     .trim();
-  const match = /^(?<age>(?:an|\d+)\s+(?:minute|minutes|hour|hours|day|days) ago)\s+`?SEC`?\s+Form\s+(?<form>[A-Z0-9-]+)/i.exec(cleaned);
+  const match = /^(?<age>(?:an|\d+)\s+(?:second|seconds|minute|minutes|hour|hours|day|days) ago)\s+`?(?<label>SEC|PR)`?\s+(?<value>[\s\S]+)$/i.exec(cleaned);
   if (!match?.groups) {
     return null;
   }
 
+  const label = match.groups.label.toUpperCase();
+  const value = label === 'SEC'
+    ? (/\bForm\s+(?<form>[A-Z0-9-]+)/i.exec(match.groups.value)?.groups?.form ?? cleanDiscordMarkdownText(match.groups.value))
+    : cleanDiscordMarkdownText(match.groups.value);
+
   return {
-    label: 'SEC',
+    label,
     age: compactRelativeAge(match.groups.age),
-    value: match.groups.form
+    value
   };
 }
 
 function compactRelativeAge(value: string): string {
   const normalized = value.toLowerCase();
   const amount = normalized.startsWith('an ') ? '1' : normalized.match(/\d+/)?.[0] ?? '';
+  if (normalized.includes('second')) {
+    return `${amount}s ago`;
+  }
+
   if (normalized.includes('minute')) {
     return `${amount}m ago`;
   }
@@ -1102,6 +1239,30 @@ function compactRelativeAge(value: string): string {
   }
 
   return value;
+}
+
+function formatDiscordRelativeTimestamp(value: string): string | null {
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return null;
+  }
+
+  const diffSeconds = Math.max(0, Math.floor((Date.now() - timestamp * 1000) / 1000));
+  if (diffSeconds < 60) {
+    return `${diffSeconds}s ago`;
+  }
+
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) {
+    return `${diffMinutes}m ago`;
+  }
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) {
+    return `${diffHours}h ago`;
+  }
+
+  return `${Math.floor(diffHours / 24)}d ago`;
 }
 
 function normalizeDiscordText(value: string): string {
