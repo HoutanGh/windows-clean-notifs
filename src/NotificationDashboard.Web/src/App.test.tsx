@@ -349,6 +349,111 @@ describe('App', () => {
     expect(screen.queryByText(/discord\.com/)).not.toBeInTheDocument();
   });
 
+  test('formats standalone trading bot SEC filings', async () => {
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(
+          73,
+          '📊 MAIN CHATS',
+          '#💰│trading-chat',
+          'NuntioBot',
+          '`08:50` `SEC` **ONFO** - `Form 8-K` [- Link](<https://www.sec.gov/Archives/example>)'
+        )
+      ])
+    });
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+
+    expect(await screen.findByText('ONFO')).toBeInTheDocument();
+    expect(screen.getByText('SEC')).toBeInTheDocument();
+    expect(screen.getByText('08:50')).toBeInTheDocument();
+    expect(screen.getByText('8-K')).toBeInTheDocument();
+    expect(screen.queryByText(/sec\.gov/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Link/)).not.toBeInTheDocument();
+  });
+
+  test('formats trading bot market status messages', async () => {
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(74, '📊 MAIN CHATS', '#💰│trading-chat', 'NuntioBot', 'Market Open in 5 minutes')
+      ])
+    });
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+
+    expect(await screen.findByText('Market opens in 5m')).toBeInTheDocument();
+  });
+
+  test('formats trading bot related PR lines with seconds ages', async () => {
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(
+          75,
+          '📊 MAIN CHATS',
+          '#💰│trading-chat',
+          'NuntioBot',
+          '`09:05` ↑ **KIDZ** < $2 ~ :flag_us: | **Float**: 8.2 M\n> * 6 seconds ago `PR` KIDZ AI Wins Award [- Link](<https://news.nuntiobot.com/article/example>)'
+        )
+      ])
+    });
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+
+    expect(await screen.findByText('KIDZ')).toBeInTheDocument();
+    expect(screen.getByText('PR')).toBeInTheDocument();
+    expect(screen.getByText('6s ago')).toBeInTheDocument();
+    expect(screen.getByText('KIDZ AI Wins Award')).toBeInTheDocument();
+    expect(screen.queryByText(/nuntiobot\.com/)).not.toBeInTheDocument();
+  });
+
+  test('formats trading bot news headlines without exposing URLs', async () => {
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(
+          76,
+          '📊 MAIN CHATS',
+          '#💰│trading-chat',
+          'NuntioBot',
+          'SOLS - Solstice Advanced Materials to Acquire Element Solutions [Link](https://www.prnewswire.com/news/example)'
+        )
+      ])
+    });
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+
+    expect(await screen.findByText('SOLS')).toBeInTheDocument();
+    expect(screen.getByText('News')).toBeInTheDocument();
+    expect(screen.getByText('Solstice Advanced Materials to Acquire Element Solutions')).toBeInTheDocument();
+    expect(screen.queryByText(/prnewswire/)).not.toBeInTheDocument();
+  });
+
+  test('formats trading bot PR headlines without requiring a flag', async () => {
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(
+          77,
+          '📊 MAIN CHATS',
+          '#💰│trading-chat',
+          'NuntioBot - PR - Spike',
+          '**SRXH** < $2 - SRX Global Declares One-Time Cash Dividend [- Link](<https://news.nuntiobot.com/article/example>) ~ 1 for 60 `R/S` Jul. 06'
+        )
+      ])
+    });
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+
+    expect(await screen.findByText('SRXH')).toBeInTheDocument();
+    expect(screen.getByText('PR Spike')).toBeInTheDocument();
+    expect(screen.getByText('SRX Global Declares One-Time Cash Dividend')).toBeInTheDocument();
+    expect(screen.getByText('R/S')).toBeInTheDocument();
+    expect(screen.queryByText(/nuntiobot\.com/)).not.toBeInTheDocument();
+  });
+
   test('keeps Discord channel columns stable when newer notifications arrive', async () => {
     const events = createFakeEventSourceFactory();
     const api = createApi({
