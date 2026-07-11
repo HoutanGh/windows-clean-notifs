@@ -14,6 +14,8 @@ const health: HealthResponse = {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   window.localStorage.clear();
   document.documentElement.removeAttribute('data-theme');
 });
@@ -504,6 +506,127 @@ describe('App', () => {
     expect(discordColumnNames()).toEqual(['#stocks-and-options', '#main', '#alerts']);
   });
 
+  test('temporarily highlights live activity in the visible Discord view', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const events = createFakeEventSourceFactory();
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(70, 'Main Chat', '#main', 'Alice', 'Already here')
+      ])
+    });
+
+    renderApp(api, events.factory);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+    await waitFor(() => expect(events.sources).toHaveLength(1));
+    act(() => events.sources[0].open());
+    vi.useFakeTimers();
+
+    act(() => {
+      events.sources[0].emit(discordNotification(71, 'Main Chat', '#main', 'Alice', 'First live message', {
+        timestamp: futureTimestamp()
+      }));
+    });
+
+    const channel = screen.getByRole('heading', { name: '#main' }).closest('.discord-channel-column');
+    const firstCard = discordCard(71);
+    expect(channel).toHaveClass('activity-highlight');
+    expect(firstCard).toHaveClass('activity-highlight');
+    expect(discordCard(70)).not.toHaveClass('activity-highlight');
+
+    act(() => vi.advanceTimersByTime(15_000));
+    act(() => {
+      events.sources[0].emit(discordNotification(72, 'Main Chat', '#main', 'Bob', 'Second live message', {
+        timestamp: futureTimestamp()
+      }));
+    });
+    act(() => vi.advanceTimersByTime(5_000));
+
+    expect(firstCard).not.toHaveClass('activity-highlight');
+    expect(discordCard(72)).toHaveClass('activity-highlight');
+    expect(channel).toHaveClass('activity-highlight');
+
+    act(() => vi.advanceTimersByTime(15_000));
+    expect(discordCard(72)).not.toHaveClass('activity-highlight');
+    expect(channel).not.toHaveClass('activity-highlight');
+  });
+
+  test('does not highlight trading-chat activity', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const events = createFakeEventSourceFactory();
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(80, 'Main Chat', '#💰│trading-chat', 'NuntioBot', 'Existing alert')
+      ])
+    });
+
+    renderApp(api, events.factory);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+    await waitFor(() => expect(events.sources).toHaveLength(1));
+    act(() => events.sources[0].open());
+    act(() => {
+      events.sources[0].emit(discordNotification(81, 'Main Chat', '#💰│trading-chat', 'NuntioBot', 'Live alert', {
+        timestamp: futureTimestamp()
+      }));
+    });
+
+    expect(discordCard(81)).not.toHaveClass('activity-highlight');
+    expect(screen.getByRole('heading', { name: '#💰│trading-chat' }).closest('.discord-channel-column'))
+      .not.toHaveClass('activity-highlight');
+  });
+
+  test('does not queue highlights while the Discord view is not visible', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const events = createFakeEventSourceFactory();
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(90, 'Main Chat', '#main', 'Alice', 'Existing message')
+      ])
+    });
+
+    renderApp(api, events.factory);
+    await waitFor(() => expect(events.sources).toHaveLength(1));
+    act(() => events.sources[0].open());
+    act(() => {
+      events.sources[0].emit(discordNotification(91, 'Main Chat', '#main', 'Alice', 'Arrived in Feed view', {
+        timestamp: futureTimestamp()
+      }));
+    });
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+    expect(discordCard(91)).not.toHaveClass('activity-highlight');
+  });
+
+  test('does not highlight activity while the dashboard is unfocused or replaying', async () => {
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    const events = createFakeEventSourceFactory();
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(100, 'Main Chat', '#main', 'Alice', 'Existing message')
+      ])
+    });
+
+    renderApp(api, events.factory);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+    await waitFor(() => expect(events.sources).toHaveLength(1));
+    act(() => events.sources[0].open());
+    act(() => {
+      events.sources[0].emit(discordNotification(101, 'Main Chat', '#main', 'Alice', 'Arrived while unfocused', {
+        timestamp: futureTimestamp()
+      }));
+    });
+
+    expect(discordCard(101)).not.toHaveClass('activity-highlight');
+
+    hasFocus.mockReturnValue(true);
+    act(() => {
+      events.sources[0].emit(discordNotification(102, 'Main Chat', '#main', 'Alice', 'Recovered after reconnect', {
+        timestamp: new Date(Date.now() - 1_000).toISOString()
+      }));
+    });
+
+    expect(discordCard(102)).not.toHaveClass('activity-highlight');
+  });
+
   test('loads Discord channel column order from browser storage', async () => {
     window.localStorage.setItem(
       'windows-clean-notifs-discord-channel-order',
@@ -691,7 +814,8 @@ function discordNotification(
   context: string,
   channel: string,
   sender: string,
-  message: string
+  message: string,
+  overrides: Partial<NotificationItem> = {}
 ): NotificationItem {
   return notification(id, {
     appId: 'com.squirrel.Discord.Discord',
@@ -703,8 +827,23 @@ function discordNotification(
       context,
       channel,
       confidence: 'parsed'
-    }
+    },
+    ...overrides
   });
+}
+
+function futureTimestamp(): string {
+  return new Date(Date.now() + 1_000).toISOString();
+}
+
+function discordCard(id: number): HTMLElement {
+  const card = screen.getAllByTestId('discord-notification-card')
+    .find((item) => item.getAttribute('data-id') === String(id));
+  if (!card) {
+    throw new Error(`Discord card ${id} was not rendered.`);
+  }
+
+  return card;
 }
 
 function source(displayName: string, appId: string, enabled: boolean): NotificationSource {
@@ -764,6 +903,10 @@ class FakeEventSource implements NotificationEventSource {
 
   public close(): void {
     this.closed = true;
+  }
+
+  public open(): void {
+    this.onopen?.(new Event('open'));
   }
 
   public emit(notificationItem: NotificationItem): void {
