@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, createHttpDashboardApi, type DashboardApi } from './api';
 import { createBrowserNotificationEventSource, type NotificationEventSourceFactory } from './events';
 import type { HealthResponse, NotificationItem, NotificationSource } from './types';
@@ -12,6 +12,7 @@ const HiddenDiscordChannelsStorageKey = 'windows-clean-notifs-hidden-discord-cha
 const DiscordChannelOrderStorageKey = 'windows-clean-notifs-discord-channel-order';
 const ChromeHiddenStorageKey = 'windows-clean-notifs-chrome-hidden';
 const TradingChatChannelName = '#💰│trading-chat';
+const DiscordActivityHighlightDurationMs = 20_000;
 const DiscordControlCharactersRegex = /[\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069]/g;
 const DiscordMarkdownLinkRegex = /\[([^\]]+)\]\s*(?:\(<[^>]+>\)|\([^)]*\)|<[^>]+>\)?)[⬏↗]?/g;
 const FlagTokenRegex = /:flag_([a-z]{2}):/gi;
@@ -145,6 +146,18 @@ export function App({
   const [discordChannelOrderKeys, setDiscordChannelOrderKeys] = useState<string[]>(
     readInitialDiscordChannelOrderKeys
   );
+  const [highlightedDiscordNotificationIds, setHighlightedDiscordNotificationIds] = useState<Set<number>>(new Set());
+  const [highlightedDiscordChannelKeys, setHighlightedDiscordChannelKeys] = useState<Set<string>>(new Set());
+  const [discordChannelPulseVersions, setDiscordChannelPulseVersions] = useState<Map<string, number>>(new Map());
+  const activeViewRef = useRef(activeView);
+  const hiddenDiscordChannelKeysRef = useRef(hiddenDiscordChannelKeys);
+  const knownNotificationIdsRef = useRef<Set<number>>(new Set());
+  const streamOpenedAtRef = useRef<number | null>(null);
+  const notificationHighlightTimersRef = useRef<Map<number, number>>(new Map());
+  const channelHighlightTimersRef = useRef<Map<string, number>>(new Map());
+
+  activeViewRef.current = activeView;
+  hiddenDiscordChannelKeysRef.current = hiddenDiscordChannelKeys;
 
   const enabledSourceCount = useMemo(
     () => sources.filter((source) => source.enabled).length,
@@ -217,8 +230,56 @@ export function App({
     }
   }, [chromeHidden]);
 
+  useEffect(() => () => {
+    for (const timerId of notificationHighlightTimersRef.current.values()) {
+      window.clearTimeout(timerId);
+    }
+    for (const timerId of channelHighlightTimersRef.current.values()) {
+      window.clearTimeout(timerId);
+    }
+  }, []);
+
+  const highlightDiscordActivity = useCallback((notification: NotificationItem) => {
+    if (!shouldHighlightDiscordActivity(
+      notification,
+      activeViewRef.current,
+      hiddenDiscordChannelKeysRef.current,
+      streamOpenedAtRef.current
+    )) {
+      return;
+    }
+
+    const channelKey = getDiscordChannelKey(notification);
+    setHighlightedDiscordNotificationIds((current) => addSetValue(current, notification.id));
+    setHighlightedDiscordChannelKeys((current) => addSetValue(current, channelKey));
+    setDiscordChannelPulseVersions((current) => {
+      const next = new Map(current);
+      next.set(channelKey, (next.get(channelKey) ?? 0) + 1);
+      return next;
+    });
+
+    const existingNotificationTimer = notificationHighlightTimersRef.current.get(notification.id);
+    if (existingNotificationTimer !== undefined) {
+      window.clearTimeout(existingNotificationTimer);
+    }
+    notificationHighlightTimersRef.current.set(notification.id, window.setTimeout(() => {
+      notificationHighlightTimersRef.current.delete(notification.id);
+      setHighlightedDiscordNotificationIds((current) => removeSetValue(current, notification.id));
+    }, DiscordActivityHighlightDurationMs));
+
+    const existingChannelTimer = channelHighlightTimersRef.current.get(channelKey);
+    if (existingChannelTimer !== undefined) {
+      window.clearTimeout(existingChannelTimer);
+    }
+    channelHighlightTimersRef.current.set(channelKey, window.setTimeout(() => {
+      channelHighlightTimersRef.current.delete(channelKey);
+      setHighlightedDiscordChannelKeys((current) => removeSetValue(current, channelKey));
+    }, DiscordActivityHighlightDurationMs));
+  }, []);
+
   const replaceNotifications = useCallback(async () => {
     const nextNotifications = sortNewestFirst(await api.getNotifications({ limit: PageSize }));
+    knownNotificationIdsRef.current = new Set(nextNotifications.map((notification) => notification.id));
     setNotifications(nextNotifications);
     setHasOlder(nextNotifications.length === PageSize);
     setStreamCursor(getHighestId(nextNotifications));
@@ -262,6 +323,7 @@ export function App({
 
         const sortedNotifications = sortNewestFirst(nextNotifications);
         setFeedError(null);
+        knownNotificationIdsRef.current = new Set(sortedNotifications.map((notification) => notification.id));
         setNotifications(sortedNotifications);
         setSources(sortSources(nextSources));
         setHasOlder(sortedNotifications.length === PageSize);
@@ -308,15 +370,22 @@ export function App({
 
     setConnectionStatus('reconnecting');
     eventSource.onopen = () => {
+      streamOpenedAtRef.current = Date.now();
       setConnectionStatus('connected');
     };
     eventSource.onerror = () => {
+      streamOpenedAtRef.current = null;
       setConnectionStatus('reconnecting');
     };
     eventSource.addEventListener('notification', (event) => {
       try {
         const notification = JSON.parse(event.data) as NotificationItem;
+        const isNewNotification = !knownNotificationIdsRef.current.has(notification.id);
+        knownNotificationIdsRef.current.add(notification.id);
         setNotifications((current) => mergeNotification(current, notification));
+        if (isNewNotification) {
+          highlightDiscordActivity(notification);
+        }
         setFeedError(null);
       } catch {
         setConnectionStatus('unavailable');
@@ -327,7 +396,7 @@ export function App({
     return () => {
       eventSource.close();
     };
-  }, [createEventSource, health, streamCursor, streamReady, streamVersion]);
+  }, [createEventSource, health, highlightDiscordActivity, streamCursor, streamReady, streamVersion]);
 
   async function openSources() {
     setSourcesOpen(true);
@@ -372,6 +441,9 @@ export function App({
     setFeedError(null);
     try {
       const older = sortNewestFirst(await api.getNotifications({ limit: PageSize, beforeId: oldestId }));
+      for (const notification of older) {
+        knownNotificationIdsRef.current.add(notification.id);
+      }
       setNotifications((current) => mergeOlderNotifications(current, older));
       setHasOlder(older.length === PageSize);
     } catch (error) {
@@ -495,6 +567,9 @@ export function App({
           <DiscordBoard
             channels={visibleDiscordChannels}
             hiddenChannels={hiddenDiscordChannels}
+            highlightedNotificationIds={highlightedDiscordNotificationIds}
+            highlightedChannelKeys={highlightedDiscordChannelKeys}
+            channelPulseVersions={discordChannelPulseVersions}
             showHiddenChannelsBar={!chromeHidden}
             onHideChannel={hideDiscordChannel}
             onShowChannel={showDiscordChannel}
@@ -688,6 +763,9 @@ function HiddenDiscordChannelsControls({
 function DiscordBoard({
   channels,
   hiddenChannels,
+  highlightedNotificationIds,
+  highlightedChannelKeys,
+  channelPulseVersions,
   showHiddenChannelsBar,
   onHideChannel,
   onShowChannel,
@@ -695,6 +773,9 @@ function DiscordBoard({
 }: {
   channels: DiscordChannelGroup[];
   hiddenChannels: DiscordChannelGroup[];
+  highlightedNotificationIds: Set<number>;
+  highlightedChannelKeys: Set<string>;
+  channelPulseVersions: Map<string, number>;
   showHiddenChannelsBar: boolean;
   onHideChannel: (channelKey: string) => void;
   onShowChannel: (channelKey: string) => void;
@@ -718,14 +799,20 @@ function DiscordBoard({
         <StateMessage title="All Discord channels hidden" detail="Restore a hidden channel to show notifications here." />
       ) : (
         <div className="discord-columns" data-testid="discord-columns" style={columnStyle}>
-          {channels.map((channel) => (
-            <section
-              key={channel.key}
-              className="discord-channel-column"
-              data-testid="discord-channel-column"
-              aria-label={`${channel.name} channel`}
-            >
-              <header>
+          {channels.map((channel) => {
+            const hasRecentActivity = highlightedChannelKeys.has(channel.key);
+            const pulseVersion = channelPulseVersions.get(channel.key) ?? 0;
+            return (
+              <section
+                key={channel.key}
+                className={hasRecentActivity ? 'discord-channel-column activity-highlight' : 'discord-channel-column'}
+                data-testid="discord-channel-column"
+                aria-label={`${channel.name} channel`}
+              >
+              <header
+                key={`${channel.key}-${pulseVersion}`}
+                className={hasRecentActivity ? 'discord-channel-header activity-pulse' : 'discord-channel-header'}
+              >
                 <div>
                   <h3>{channel.name}</h3>
                   {channel.context ? <small>{channel.context}</small> : null}
@@ -745,18 +832,29 @@ function DiscordBoard({
               </header>
               <ol>
                 {channel.notifications.map((notification) => (
-                  <DiscordNotificationCard key={notification.id} notification={notification} />
+                  <DiscordNotificationCard
+                    key={notification.id}
+                    notification={notification}
+                    highlighted={highlightedNotificationIds.has(notification.id)}
+                  />
                 ))}
               </ol>
             </section>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>
   );
 }
 
-function DiscordNotificationCard({ notification }: { notification: NotificationItem }) {
+function DiscordNotificationCard({
+  notification,
+  highlighted
+}: {
+  notification: NotificationItem;
+  highlighted: boolean;
+}) {
   const sender = normalizeGroupLabel(notification.discord?.sender)
     ?? normalizeGroupLabel(notification.primaryText)
     ?? notification.sourceApp;
@@ -764,7 +862,11 @@ function DiscordNotificationCard({ notification }: { notification: NotificationI
 
   return (
     <li
-      className={tradingMessage ? 'discord-card trading-bot-card' : 'discord-card'}
+      className={[
+        'discord-card',
+        tradingMessage ? 'trading-bot-card' : '',
+        highlighted ? 'activity-highlight' : ''
+      ].filter(Boolean).join(' ')}
       data-testid="discord-notification-card"
       data-id={notification.id}
     >
@@ -1482,6 +1584,39 @@ function isDiscordNotification(notification: NotificationItem): boolean {
   return notification.discord !== null && notification.discord !== undefined;
 }
 
+function shouldHighlightDiscordActivity(
+  notification: NotificationItem,
+  activeView: ViewMode,
+  hiddenChannelKeys: Set<string>,
+  streamOpenedAt: number | null
+): boolean {
+  if (
+    activeView !== 'discord'
+    || document.visibilityState !== 'visible'
+    || !document.hasFocus()
+    || streamOpenedAt === null
+    || !isDiscordNotification(notification)
+  ) {
+    return false;
+  }
+
+  const channelName = normalizeGroupLabel(notification.discord?.channel) ?? UngroupedLabel;
+  if (normalizeDiscordText(channelName) === TradingChatChannelName) {
+    return false;
+  }
+
+  const timestamp = Date.parse(notification.timestamp);
+  return Number.isFinite(timestamp)
+    && timestamp > streamOpenedAt
+    && !hiddenChannelKeys.has(getDiscordChannelKey(notification));
+}
+
+function getDiscordChannelKey(notification: NotificationItem): string {
+  const channelName = normalizeGroupLabel(notification.discord?.channel) ?? UngroupedLabel;
+  const contextName = normalizeGroupLabel(notification.discord?.context);
+  return createDiscordChannelKey(channelName, contextName);
+}
+
 function normalizeGroupLabel(value: string | null | undefined): string | null {
   const normalized = value?.trim();
   return normalized && normalized.length > 0 ? normalized : null;
@@ -1489,6 +1624,26 @@ function normalizeGroupLabel(value: string | null | undefined): string | null {
 
 function createDiscordChannelKey(channelName: string, contextName: string | null): string {
   return JSON.stringify([contextName ?? '', channelName]);
+}
+
+function addSetValue<T>(current: Set<T>, value: T): Set<T> {
+  if (current.has(value)) {
+    return current;
+  }
+
+  const next = new Set(current);
+  next.add(value);
+  return next;
+}
+
+function removeSetValue<T>(current: Set<T>, value: T): Set<T> {
+  if (!current.has(value)) {
+    return current;
+  }
+
+  const next = new Set(current);
+  next.delete(value);
+  return next;
 }
 
 function formatDiscordChannelActionLabel(action: 'Hide' | 'Show', channel: DiscordChannelGroup): string {

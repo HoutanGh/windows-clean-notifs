@@ -380,6 +380,12 @@ h3 {
   border: 1px solid #d4dae0;
   border-radius: 8px;
   background: #fbfcfd;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.discord-channel-column.activity-highlight {
+  border-color: #c98200;
+  box-shadow: 0 0 0 2px rgba(201, 130, 0, 0.22);
 }
 
 .discord-channel-column header {
@@ -392,6 +398,16 @@ h3 {
   border-bottom: 1px solid #dfe5eb;
   background: #f7f9fb;
   border-radius: 8px 8px 0 0;
+  transition: background-color 180ms ease, border-color 180ms ease;
+}
+
+.discord-channel-column.activity-highlight > header {
+  border-bottom-color: #e1b85e;
+  background: #fff4d2;
+}
+
+.discord-channel-header.activity-pulse {
+  animation: discord-channel-activity-pulse 850ms ease-out;
 }
 
 .discord-channel-column header > div:first-child {
@@ -466,10 +482,40 @@ h3 {
   padding: 8px 9px 9px;
   border-bottom: 1px solid #e8edf1;
   background: #ffffff;
+  transition: background-color 240ms ease, box-shadow 240ms ease;
+}
+
+.discord-card.activity-highlight {
+  background: #fff8df;
+  box-shadow: inset 4px 0 0 #d99400;
+  animation: discord-card-activity-arrival 700ms ease-out;
 }
 
 .discord-card:last-child {
   border-bottom: 0;
+}
+
+@keyframes discord-channel-activity-pulse {
+  0% {
+    box-shadow: inset 0 0 0 999px rgba(255, 190, 46, 0.38);
+  }
+  100% {
+    box-shadow: inset 0 0 0 999px rgba(255, 190, 46, 0);
+  }
+}
+
+@keyframes discord-card-activity-arrival {
+  0% {
+    background: #ffe3a0;
+    box-shadow: inset 6px 0 0 #c98200;
+  }
+}
+
+@keyframes discord-card-activity-arrival-night {
+  0% {
+    background: #4a3916;
+    box-shadow: inset 6px 0 0 #f1b53d;
+  }
 }
 
 .discord-card-meta {
@@ -904,6 +950,16 @@ h3 {
   background: #1d2329;
 }
 
+:root[data-theme='night'] .discord-channel-column.activity-highlight {
+  border-color: #e0a126;
+  box-shadow: 0 0 0 2px rgba(224, 161, 38, 0.28);
+}
+
+:root[data-theme='night'] .discord-channel-column.activity-highlight > header {
+  border-bottom-color: #72561f;
+  background: #332a18;
+}
+
 :root[data-theme='night'] .discord-channel-column h3,
 :root[data-theme='night'] .discord-card strong,
 :root[data-theme='night'] .discord-card p {
@@ -1012,6 +1068,25 @@ h3 {
   background: #171b1f;
 }
 
+:root[data-theme='night'] .discord-card.activity-highlight {
+  background: #2b2518;
+  box-shadow: inset 4px 0 0 #e0a126;
+  animation-name: discord-card-activity-arrival-night;
+}
+
 :root[data-theme='night'] .error-text {
   color: #ffb4ab;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .discord-channel-column,
+  .discord-channel-column header,
+  .discord-card {
+    transition: none;
+  }
+
+  .discord-channel-header.activity-pulse,
+  .discord-card.activity-highlight {
+    animation: none;
+  }
 }
