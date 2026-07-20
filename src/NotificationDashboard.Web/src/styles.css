@@ -383,11 +383,6 @@ h3 {
   transition: border-color 180ms ease, box-shadow 180ms ease;
 }
 
-.discord-channel-column.activity-highlight {
-  border-color: #c98200;
-  box-shadow: 0 0 0 2px rgba(201, 130, 0, 0.22);
-}
-
 .discord-channel-column header {
   display: flex;
   align-items: center;
@@ -399,15 +394,6 @@ h3 {
   background: #f7f9fb;
   border-radius: 8px 8px 0 0;
   transition: background-color 180ms ease, border-color 180ms ease;
-}
-
-.discord-channel-column.activity-highlight > header {
-  border-bottom-color: #e1b85e;
-  background: #fff4d2;
-}
-
-.discord-channel-header.activity-pulse {
-  animation: discord-channel-activity-pulse 850ms ease-out;
 }
 
 .discord-channel-column header > div:first-child {
@@ -506,15 +492,6 @@ h3 {
 
 .discord-card:last-child {
   border-bottom: 0;
-}
-
-@keyframes discord-channel-activity-pulse {
-  0% {
-    box-shadow: inset 0 0 0 999px rgba(255, 190, 46, 0.38);
-  }
-  100% {
-    box-shadow: inset 0 0 0 999px rgba(255, 190, 46, 0);
-  }
 }
 
 @keyframes discord-card-activity-arrival {
@@ -963,16 +940,6 @@ h3 {
   background: #1d2329;
 }
 
-:root[data-theme='night'] .discord-channel-column.activity-highlight {
-  border-color: #e0a126;
-  box-shadow: 0 0 0 2px rgba(224, 161, 38, 0.28);
-}
-
-:root[data-theme='night'] .discord-channel-column.activity-highlight > header {
-  border-bottom-color: #72561f;
-  background: #332a18;
-}
-
 :root[data-theme='night'] .discord-channel-column h3,
 :root[data-theme='night'] .discord-card strong,
 :root[data-theme='night'] .discord-card p {
@@ -1109,7 +1076,6 @@ h3 {
     transition: none;
   }
 
-  .discord-channel-header.activity-pulse,
   .discord-card.activity-arrival {
     animation: none;
   }

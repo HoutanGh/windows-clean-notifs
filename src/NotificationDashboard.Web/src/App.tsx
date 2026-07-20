@@ -824,20 +824,15 @@ function DiscordBoard({
         <div className="discord-columns" data-testid="discord-columns" style={columnStyle}>
           {channels.map((channel) => {
             const highlightedNotificationId = highlightedNotifications.get(channel.key);
-            const hasRecentActivity = highlightedNotificationId !== undefined
-              && channel.notifications.some((notification) => notification.id === highlightedNotificationId);
             const pulseVersion = channelPulseVersions.get(channel.key) ?? 0;
             return (
               <section
                 key={channel.key}
-                className={hasRecentActivity ? 'discord-channel-column activity-highlight' : 'discord-channel-column'}
+                className="discord-channel-column"
                 data-testid="discord-channel-column"
                 aria-label={`${channel.name} channel`}
               >
-              <header
-                key={`${channel.key}-${pulseVersion}`}
-                className={hasRecentActivity ? 'discord-channel-header activity-pulse' : 'discord-channel-header'}
-              >
+              <header className="discord-channel-header">
                 <div>
                   <h3>{channel.name}</h3>
                   {channel.context ? <small>{channel.context}</small> : null}
