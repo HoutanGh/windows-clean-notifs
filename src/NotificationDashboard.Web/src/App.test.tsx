@@ -529,7 +529,7 @@ describe('App', () => {
 
     const channel = screen.getByRole('heading', { name: '#main' }).closest('.discord-channel-column');
     const firstCard = discordCard(71);
-    expect(channel).toHaveClass('activity-highlight');
+    expect(channel).not.toHaveClass('activity-highlight');
     expect(firstCard).toHaveClass('activity-highlight');
     expect(firstCard).toHaveClass('activity-arrival');
     expect(discordCard(70)).not.toHaveClass('activity-highlight');
@@ -545,7 +545,7 @@ describe('App', () => {
 
     expect(firstCard).not.toHaveClass('activity-highlight');
     expect(discordCard(72)).toHaveClass('activity-highlight');
-    expect(channel).toHaveClass('activity-highlight');
+    expect(channel).not.toHaveClass('activity-highlight');
 
     fireEvent.click(discordCard(72));
     expect(discordCard(72)).not.toHaveClass('activity-highlight');
