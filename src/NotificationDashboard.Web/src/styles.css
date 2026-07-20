@@ -488,6 +488,19 @@ h3 {
 .discord-card.activity-highlight {
   background: #fff8df;
   box-shadow: inset 4px 0 0 #d99400;
+  cursor: pointer;
+}
+
+.discord-card.activity-highlight:hover {
+  background: #fff1c2;
+}
+
+.discord-card.activity-highlight:focus-visible {
+  outline: 2px solid #9b6500;
+  outline-offset: -2px;
+}
+
+.discord-card.activity-arrival {
   animation: discord-card-activity-arrival 700ms ease-out;
 }
 
@@ -1071,6 +1084,17 @@ h3 {
 :root[data-theme='night'] .discord-card.activity-highlight {
   background: #2b2518;
   box-shadow: inset 4px 0 0 #e0a126;
+}
+
+:root[data-theme='night'] .discord-card.activity-highlight:hover {
+  background: #3a301a;
+}
+
+:root[data-theme='night'] .discord-card.activity-highlight:focus-visible {
+  outline-color: #f1b53d;
+}
+
+:root[data-theme='night'] .discord-card.activity-arrival {
   animation-name: discord-card-activity-arrival-night;
 }
 
@@ -1086,7 +1110,7 @@ h3 {
   }
 
   .discord-channel-header.activity-pulse,
-  .discord-card.activity-highlight {
+  .discord-card.activity-arrival {
     animation: none;
   }
 }
