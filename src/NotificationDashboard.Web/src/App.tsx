@@ -1,4 +1,5 @@
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { FocusEvent as ReactFocusEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { ApiError, createHttpDashboardApi, type DashboardApi } from './api';
 import { createBrowserNotificationEventSource, type NotificationEventSourceFactory } from './events';
 import type { HealthResponse, NotificationItem, NotificationSource } from './types';
@@ -11,8 +12,10 @@ const ThemeStorageKey = 'windows-clean-notifs-theme';
 const HiddenDiscordChannelsStorageKey = 'windows-clean-notifs-hidden-discord-channels';
 const DiscordChannelOrderStorageKey = 'windows-clean-notifs-discord-channel-order';
 const ChromeHiddenStorageKey = 'windows-clean-notifs-chrome-hidden';
+const ChromeRailPlacementStorageKey = 'windows-clean-notifs-chrome-rail-placement';
 const HighlightedDiscordNotificationsStorageKey = 'windows-clean-notifs-highlighted-discord-notifications';
 const TradingChatChannelName = '#💰│trading-chat';
+const ChromeRailDragThreshold = 4;
 const DiscordControlCharactersRegex = /[\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069]/g;
 const DiscordMarkdownLinkRegex = /\[([^\]]+)\]\s*(?:\(<[^>]+>\)|\([^)]*\)|<[^>]+>\)?)[⬏↗]?/g;
 const FlagTokenRegex = /:flag_([a-z]{2}):/gi;
@@ -22,6 +25,14 @@ type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'unavailab
 type ViewMode = 'feed' | 'discord';
 type ThemeMode = 'light' | 'night';
 type DashboardControlsVariant = 'header' | 'rail';
+type ChromeRailEdge = 'top' | 'right' | 'bottom' | 'left';
+type ChromeRailAlignment = 'start' | 'center' | 'end';
+
+type ChromeRailPlacement = {
+  edge: ChromeRailEdge;
+  offset: number;
+  locked: boolean;
+};
 
 type AppProps = {
   api?: DashboardApi;
@@ -125,6 +136,8 @@ type DashboardControlsProps = {
   onOpenSources: () => void;
   chromeHidden: boolean;
   onChromeHiddenChange: (chromeHidden: boolean) => void;
+  chromeRailLocked: boolean;
+  onChromeRailLockedChange: (locked: boolean) => void;
   hiddenChannels: DiscordChannelGroup[];
   onShowChannel: (channelKey: string) => void;
   onShowAllChannels: () => void;
@@ -152,6 +165,9 @@ export function App({
   const [activeView, setActiveView] = useState<ViewMode>('feed');
   const [themeMode, setThemeMode] = useState<ThemeMode>(readInitialThemeMode);
   const [chromeHidden, setChromeHidden] = useState(readInitialChromeHidden);
+  const [chromeRailPlacement, setChromeRailPlacement] = useState<ChromeRailPlacement>(
+    readInitialChromeRailPlacement
+  );
   const [hiddenDiscordChannelKeys, setHiddenDiscordChannelKeys] = useState<Set<string>>(
     readInitialHiddenDiscordChannelKeys
   );
@@ -240,6 +256,13 @@ export function App({
     } catch {
     }
   }, [chromeHidden]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(ChromeRailPlacementStorageKey, JSON.stringify(chromeRailPlacement));
+    } catch {
+    }
+  }, [chromeRailPlacement]);
 
   useEffect(() => {
     try {
@@ -511,27 +534,29 @@ export function App({
   return (
     <div className={chromeHidden ? 'app-shell chrome-hidden' : 'app-shell'}>
       {chromeHidden ? (
-        <div className="chrome-control-rail" aria-label="Hidden dashboard controls">
-          <div className="chrome-rail-menu">
-            <DashboardControls
-              variant="rail"
-              discordAvailable={discordAvailable}
-              activeView={activeView}
-              onViewChange={setActiveView}
-              themeMode={themeMode}
-              onThemeModeChange={setThemeMode}
-              onOpenSources={openSources}
-              chromeHidden={chromeHidden}
-              onChromeHiddenChange={setChromeHidden}
-              hiddenChannels={hiddenDiscordChannels}
-              onShowChannel={showDiscordChannel}
-              onShowAllChannels={showAllDiscordChannels}
-            />
-          </div>
-          <button type="button" className="chrome-rail-handle" aria-label="Show dashboard controls" title="Dashboard controls">
-            <span aria-hidden="true">⋮</span>
-          </button>
-        </div>
+        <ChromeControlRail
+          placement={chromeRailPlacement}
+          onPlacementChange={setChromeRailPlacement}
+        >
+          <DashboardControls
+            variant="rail"
+            discordAvailable={discordAvailable}
+            activeView={activeView}
+            onViewChange={setActiveView}
+            themeMode={themeMode}
+            onThemeModeChange={setThemeMode}
+            onOpenSources={openSources}
+            chromeHidden={chromeHidden}
+            onChromeHiddenChange={setChromeHidden}
+            chromeRailLocked={chromeRailPlacement.locked}
+            onChromeRailLockedChange={(locked) => {
+              setChromeRailPlacement((current) => ({ ...current, locked }));
+            }}
+            hiddenChannels={hiddenDiscordChannels}
+            onShowChannel={showDiscordChannel}
+            onShowAllChannels={showAllDiscordChannels}
+          />
+        </ChromeControlRail>
       ) : (
         <header className="app-header">
           <div>
@@ -551,6 +576,10 @@ export function App({
             onOpenSources={openSources}
             chromeHidden={chromeHidden}
             onChromeHiddenChange={setChromeHidden}
+            chromeRailLocked={chromeRailPlacement.locked}
+            onChromeRailLockedChange={(locked) => {
+              setChromeRailPlacement((current) => ({ ...current, locked }));
+            }}
             hiddenChannels={hiddenDiscordChannels}
             onShowChannel={showDiscordChannel}
             onShowAllChannels={showAllDiscordChannels}
@@ -667,6 +696,161 @@ export function App({
   );
 }
 
+function ChromeControlRail({
+  placement,
+  onPlacementChange,
+  children
+}: {
+  placement: ChromeRailPlacement;
+  onPlacementChange: (placement: ChromeRailPlacement) => void;
+  children: ReactNode;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [dragPlacement, setDragPlacement] = useState<ChromeRailPlacement | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    dragging: boolean;
+    placement: ChromeRailPlacement;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
+  const visiblePlacement = dragPlacement ?? placement;
+  const alignment = getChromeRailAlignment(visiblePlacement.offset);
+  const railStyle = {
+    '--chrome-rail-offset': `${visiblePlacement.offset * 100}%`
+  } as CSSProperties;
+  const railClassName = [
+    'chrome-control-rail',
+    `rail-edge-${visiblePlacement.edge}`,
+    `rail-align-${alignment}`,
+    visiblePlacement.locked ? 'position-locked' : 'position-unlocked',
+    dragging ? 'is-dragging' : '',
+    menuOpen && !dragging ? 'menu-open' : ''
+  ].filter(Boolean).join(' ');
+  const horizontalEdge = visiblePlacement.edge === 'top' || visiblePlacement.edge === 'bottom';
+
+  function handlePointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (placement.locked || event.button !== 0) {
+      return;
+    }
+
+    setMenuOpen(false);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      dragging: false,
+      placement
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLButtonElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    if (!drag.dragging) {
+      const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+      if (distance < ChromeRailDragThreshold) {
+        return;
+      }
+
+      drag.dragging = true;
+      setDragging(true);
+      setMenuOpen(false);
+    }
+
+    const nextPlacement = getChromeRailPlacementForPoint(
+      event.clientX,
+      event.clientY,
+      placement.locked
+    );
+    drag.placement = nextPlacement;
+    setDragPlacement(nextPlacement);
+  }
+
+  function finishPointerInteraction(event: ReactPointerEvent<HTMLButtonElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    if (drag.dragging) {
+      onPlacementChange(drag.placement);
+      suppressClickRef.current = true;
+      window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
+    }
+
+    dragRef.current = null;
+    setDragPlacement(null);
+    setDragging(false);
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    }
+  }
+
+  function handleBlur(event: ReactFocusEvent<HTMLDivElement>) {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setMenuOpen(false);
+    }
+  }
+
+  return (
+    <div
+      className={railClassName}
+      style={railStyle}
+      aria-label="Hidden dashboard controls"
+      onPointerLeave={(event) => {
+        if (!event.currentTarget.contains(document.activeElement)) {
+          setMenuOpen(false);
+        }
+      }}
+      onFocusCapture={() => {
+        if (!dragRef.current) {
+          setMenuOpen(true);
+        }
+      }}
+      onBlurCapture={handleBlur}
+    >
+      <button
+        type="button"
+        className="chrome-rail-handle"
+        aria-label="Show dashboard controls"
+        aria-controls="chrome-rail-menu"
+        aria-expanded={menuOpen && !dragging}
+        title={placement.locked ? 'Dashboard controls. Position locked.' : 'Dashboard controls. Drag to move.'}
+        onPointerEnter={() => {
+          if (!dragRef.current) {
+            setMenuOpen(true);
+          }
+        }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={finishPointerInteraction}
+        onPointerCancel={finishPointerInteraction}
+        onClick={() => {
+          if (suppressClickRef.current) {
+            return;
+          }
+
+          setMenuOpen((current) => !current);
+        }}
+      >
+        <span aria-hidden="true">{horizontalEdge ? '⋯' : '⋮'}</span>
+      </button>
+      <div id="chrome-rail-menu" className="chrome-rail-menu">
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function DashboardControls({
   variant,
   discordAvailable,
@@ -677,6 +861,8 @@ function DashboardControls({
   onOpenSources,
   chromeHidden,
   onChromeHiddenChange,
+  chromeRailLocked,
+  onChromeRailLockedChange,
   hiddenChannels,
   onShowChannel,
   onShowAllChannels
@@ -730,6 +916,15 @@ function DashboardControls({
           onShowAllChannels={onShowAllChannels}
           compact
         />
+      ) : null}
+      {variant === 'rail' ? (
+        <button
+          type="button"
+          className="button subtle"
+          onClick={() => onChromeRailLockedChange(!chromeRailLocked)}
+        >
+          {chromeRailLocked ? 'Unlock position' : 'Lock position'}
+        </button>
       ) : null}
       <button type="button" className="button" onClick={onOpenSources}>
         Sources
@@ -1600,6 +1795,47 @@ function formatTradingSignalClass(signal: string): string {
   return 'signal-neutral';
 }
 
+function getChromeRailPlacementForPoint(
+  clientX: number,
+  clientY: number,
+  locked: boolean
+): ChromeRailPlacement {
+  const viewportWidth = Math.max(window.innerWidth, 1);
+  const viewportHeight = Math.max(window.innerHeight, 1);
+  const x = Math.min(viewportWidth, Math.max(0, clientX));
+  const y = Math.min(viewportHeight, Math.max(0, clientY));
+  const candidates: Array<{ edge: ChromeRailEdge; distance: number }> = [
+    { edge: 'top', distance: y },
+    { edge: 'right', distance: viewportWidth - x },
+    { edge: 'bottom', distance: viewportHeight - y },
+    { edge: 'left', distance: x }
+  ];
+  let nearest = candidates[0];
+  for (const candidate of candidates.slice(1)) {
+    if (candidate.distance < nearest.distance) {
+      nearest = candidate;
+    }
+  }
+
+  const offset = nearest.edge === 'top' || nearest.edge === 'bottom'
+    ? x / viewportWidth
+    : y / viewportHeight;
+
+  return {
+    edge: nearest.edge,
+    offset: Math.min(1, Math.max(0, offset)),
+    locked
+  };
+}
+
+function getChromeRailAlignment(offset: number): ChromeRailAlignment {
+  if (offset < 1 / 3) {
+    return 'start';
+  }
+
+  return offset > 2 / 3 ? 'end' : 'center';
+}
+
 function StateMessage({ title, detail }: { title: string; detail?: string }) {
   return (
     <div className="state-message">
@@ -1781,6 +2017,48 @@ function readInitialChromeHidden(): boolean {
   } catch {
     return false;
   }
+}
+
+function readInitialChromeRailPlacement(): ChromeRailPlacement {
+  const fallback: ChromeRailPlacement = {
+    edge: 'right',
+    offset: 0.5,
+    locked: false
+  };
+
+  try {
+    const storedPlacement = window.localStorage.getItem(ChromeRailPlacementStorageKey);
+    if (!storedPlacement) {
+      return fallback;
+    }
+
+    const parsedPlacement: unknown = JSON.parse(storedPlacement);
+    if (!parsedPlacement || typeof parsedPlacement !== 'object') {
+      return fallback;
+    }
+
+    const candidate = parsedPlacement as Partial<ChromeRailPlacement>;
+    if (
+      !isChromeRailEdge(candidate.edge)
+      || typeof candidate.offset !== 'number'
+      || !Number.isFinite(candidate.offset)
+      || typeof candidate.locked !== 'boolean'
+    ) {
+      return fallback;
+    }
+
+    return {
+      edge: candidate.edge,
+      offset: Math.min(1, Math.max(0, candidate.offset)),
+      locked: candidate.locked
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function isChromeRailEdge(value: unknown): value is ChromeRailEdge {
+  return value === 'top' || value === 'right' || value === 'bottom' || value === 'left';
 }
 
 function readInitialDiscordChannelOrderKeys(): string[] {
