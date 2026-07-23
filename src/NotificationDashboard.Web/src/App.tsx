@@ -99,6 +99,18 @@ type TradingBotMessage =
     age: string | null;
   }
   | {
+    kind: 'tickerOnly';
+    ticker: string;
+  }
+  | {
+    kind: 'topGainer';
+    ticker: string;
+    rank: string;
+    percent: string;
+    volume: string;
+    signal: string | null;
+  }
+  | {
     kind: 'fallback';
     text: string;
   };
@@ -949,7 +961,7 @@ function TradingBotMessageView({ message }: { message: TradingBotMessage }) {
           <div className="trading-related" aria-label="Related trading signals">
             {message.related.map((item) => (
               <div key={`${item.label}-${item.age}-${item.value}`}>
-                <span className="trading-signal signal-filing">{item.label}</span>
+                <span className={`trading-signal ${formatTradingSignalClass(item.label)}`}>{item.label}</span>
                 <span>{item.age}</span>
                 <strong>{item.value}</strong>
               </div>
@@ -1045,6 +1057,36 @@ function TradingBotMessageView({ message }: { message: TradingBotMessage }) {
     );
   }
 
+  if (message.kind === 'tickerOnly') {
+    return (
+      <div className="trading-card-body">
+        <div className="trading-card-head">
+          <div className="trading-symbol-row">
+            <strong className="trading-ticker">{message.ticker}</strong>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (message.kind === 'topGainer') {
+    return (
+      <div className="trading-card-body">
+        <div className="trading-card-head">
+          <div className="trading-symbol-row">
+            <strong className="trading-ticker">{message.ticker}</strong>
+            <span className="trading-signal signal-up">{message.rank} Top gainer</span>
+            <span className="trading-percent">{message.percent}</span>
+          </div>
+        </div>
+        <TradingChipRow
+          signals={[message.signal]}
+          metrics={[{ label: 'Vol', value: message.volume }]}
+        />
+      </div>
+    );
+  }
+
   return (
     <p className="trading-clean-text">{renderTextWithFlags(message.text)}</p>
   );
@@ -1112,6 +1154,8 @@ function parseTradingBotMessage(notification: NotificationItem, sender: string):
     ?? parseStandaloneSecFiling(text)
     ?? parseMarketStatus(text)
     ?? parseNewsHeadline(text)
+    ?? parseTopGainer(text)
+    ?? parseTickerOnly(text)
     ?? {
       kind: 'fallback',
       text: cleanDiscordMarkdownText(text)
@@ -1256,6 +1300,21 @@ function parseMarketStatus(text: string): TradingBotMessage | null {
     };
   }
 
+  if (/^Market Close(?:\s*<t:\d+:R>)?\s*$/i.test(text)) {
+    return {
+      kind: 'marketStatus',
+      text: 'Market Close'
+    };
+  }
+
+  const closeInMatch = /^Market Close in (?<minutes>\d+) minutes?$/i.exec(text);
+  if (closeInMatch?.groups) {
+    return {
+      kind: 'marketStatus',
+      text: `Market closes in ${closeInMatch.groups.minutes}m`
+    };
+  }
+
   if (/^Market Closed/i.test(text)) {
     return {
       kind: 'marketStatus',
@@ -1287,6 +1346,35 @@ function parseNewsHeadline(text: string): TradingBotMessage | null {
     ticker: plainMatch.groups.ticker,
     headline: cleanDiscordMarkdownText(plainMatch.groups.headline),
     age: null
+  };
+}
+
+function parseTopGainer(text: string): TradingBotMessage | null {
+  const cleanedText = cleanDiscordMarkdownText(text);
+  const match = /^(?<ticker>[A-Z.]{1,7})\s+#(?<rank>\d+)\s+top-gainer\s+(?<percent>[+-]?\d+(?:\.\d+)?%)\s+-\s+(?<volume>[\d,.]+)\s+vol(?:\s+~\s+(?<signal>[A-Z][A-Z0-9+*-]*))?$/i.exec(cleanedText);
+  if (!match?.groups) {
+    return null;
+  }
+
+  return {
+    kind: 'topGainer',
+    ticker: match.groups.ticker.toUpperCase(),
+    rank: `#${match.groups.rank}`,
+    percent: match.groups.percent,
+    volume: match.groups.volume,
+    signal: match.groups.signal?.toUpperCase() ?? null
+  };
+}
+
+function parseTickerOnly(text: string): TradingBotMessage | null {
+  const ticker = cleanDiscordMarkdownText(text);
+  if (!/^[A-Z.]{1,7}$/.test(ticker)) {
+    return null;
+  }
+
+  return {
+    kind: 'tickerOnly',
+    ticker
   };
 }
 
@@ -1342,7 +1430,7 @@ function parseRelatedLine(line: string): TradingRelatedItem | null {
     .replace(/^>\s*/, '')
     .replace(/^\*\s*/, '')
     .trim();
-  const match = /^(?<age>(?:an|\d+)\s+(?:second|seconds|minute|minutes|hour|hours|day|days) ago)\s+`?(?<label>SEC|PR)`?\s+(?<value>[\s\S]+)$/i.exec(cleaned);
+  const match = /^(?<age>(?:(?:a|an|\d+)\s+(?:second|seconds|minute|minutes|hour|hours|day|days) ago|in\s+\d+\s+(?:second|seconds|minute|minutes|hour|hours|day|days)))\s+`?(?<label>SEC|PR|AR)`?\s+(?<value>[\s\S]+)$/i.exec(cleaned);
   if (!match?.groups) {
     return null;
   }
@@ -1361,21 +1449,21 @@ function parseRelatedLine(line: string): TradingRelatedItem | null {
 
 function compactRelativeAge(value: string): string {
   const normalized = value.toLowerCase();
-  const amount = normalized.startsWith('an ') ? '1' : normalized.match(/\d+/)?.[0] ?? '';
+  const isFuture = normalized.startsWith('in ');
+  const amount = /^(?:a|an)\s/.test(normalized) ? '1' : normalized.match(/\d+/)?.[0] ?? '';
+  let compactUnit = '';
   if (normalized.includes('second')) {
-    return `${amount}s ago`;
+    compactUnit = 's';
+  } else if (normalized.includes('minute')) {
+    compactUnit = 'm';
+  } else if (normalized.includes('hour')) {
+    compactUnit = 'h';
+  } else if (normalized.includes('day')) {
+    compactUnit = 'd';
   }
 
-  if (normalized.includes('minute')) {
-    return `${amount}m ago`;
-  }
-
-  if (normalized.includes('hour')) {
-    return `${amount}h ago`;
-  }
-
-  if (normalized.includes('day')) {
-    return `${amount}d ago`;
+  if (amount && compactUnit) {
+    return isFuture ? `in ${amount}${compactUnit}` : `${amount}${compactUnit} ago`;
   }
 
   return value;
@@ -1497,7 +1585,7 @@ function formatHaltSignalClass(status: string): string {
 }
 
 function formatTradingSignalClass(signal: string): string {
-  if (signal === 'PR' || signal === 'PR+' || signal.startsWith('PR ')) {
+  if (signal === 'PR' || signal === 'PR+' || signal === 'PR*' || signal.startsWith('PR ')) {
     return 'signal-news';
   }
 
