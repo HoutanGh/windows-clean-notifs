@@ -388,6 +388,50 @@ describe('App', () => {
     expect(await screen.findByText('Market opens in 5m')).toBeInTheDocument();
   });
 
+  test('formats trading bot market close variants', async () => {
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(79, '📊 MAIN CHATS', '#💰│trading-chat', 'NuntioBot', 'Market Close'),
+        discordNotification(78, '📊 MAIN CHATS', '#💰│trading-chat', 'NuntioBot', 'Market Close <t:1784577600:R>'),
+        discordNotification(77, '📊 MAIN CHATS', '#💰│trading-chat', 'NuntioBot', 'Market Close in 5 minutes')
+      ])
+    });
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+
+    expect(await screen.findByText('Market closes in 5m')).toBeInTheDocument();
+    expect(screen.getAllByText('Market Close')).toHaveLength(2);
+    expect(screen.queryByText(/1784577600/)).not.toBeInTheDocument();
+  });
+
+  test('formats ticker-only and individual top-gainer messages', async () => {
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(
+          81,
+          '📊 MAIN CHATS',
+          '#💰│trading-chat',
+          'NuntioBot',
+          '```\nRCON #4 top-gainer +92.5% - 207,100 vol  ~  PR*\n```'
+        ),
+        discordNotification(80, '📊 MAIN CHATS', '#💰│trading-chat', 'NuntioBot', 'VCIG')
+      ])
+    });
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+
+    expect(await screen.findByText('VCIG')).toHaveClass('trading-ticker');
+    expect(screen.getByText('RCON')).toHaveClass('trading-ticker');
+    expect(screen.getByText('#4 Top gainer')).toHaveClass('signal-up');
+    expect(screen.getByText('+92.5%')).toBeInTheDocument();
+    expect(screen.getByText('Vol')).toBeInTheDocument();
+    expect(screen.getByText('207,100')).toBeInTheDocument();
+    expect(screen.getByText('PR*')).toHaveClass('signal-news');
+    expect(screen.queryByText(/```/)).not.toBeInTheDocument();
+  });
+
   test('formats trading bot related PR lines with seconds ages', async () => {
     const api = createApi({
       getNotifications: vi.fn().mockResolvedValue([
@@ -409,6 +453,49 @@ describe('App', () => {
     expect(screen.getByText('6s ago')).toBeInTheDocument();
     expect(screen.getByText('KIDZ AI Wins Award')).toBeInTheDocument();
     expect(screen.queryByText(/nuntiobot\.com/)).not.toBeInTheDocument();
+  });
+
+  test('formats related analyst ratings and additional relative-age forms', async () => {
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(
+          84,
+          '📊 MAIN CHATS',
+          '#💰│trading-chat',
+          'NuntioBot',
+          '`08:10` ↑ **WKSP** < $1 ~ :flag_us: | **Float**: 12.5 M\n> * in 1 seconds `PR` Worksport Announces Record Growth [- Link](<https://news.nuntiobot.com/article/example>)'
+        ),
+        discordNotification(
+          83,
+          '📊 MAIN CHATS',
+          '#💰│trading-chat',
+          'NuntioBot',
+          '`08:31` ↑ **RDGT** < $2 ~ :flag_cn: | **Float**: 880 k\n> * a minute ago `SEC` Form 6-K [- Link](<https://www.sec.gov/Archives/example>)'
+        ),
+        discordNotification(
+          82,
+          '📊 MAIN CHATS',
+          '#💰│trading-chat',
+          'NuntioBot',
+          '`09:38` ↗ **SLNH** < $2 ~ :flag_us: | **Float**: 78.7 M\n> * 3 hours ago `AR` HC Wainwright Assumes Soluna Holdings at Buy, Price Target $4'
+        )
+      ])
+    });
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+
+    expect(await screen.findByText('AR')).toBeInTheDocument();
+    expect(screen.getByText('3h ago')).toBeInTheDocument();
+    expect(screen.getByText('HC Wainwright Assumes Soluna Holdings at Buy, Price Target $4')).toBeInTheDocument();
+    expect(screen.getByText('SEC')).toBeInTheDocument();
+    expect(screen.getByText('1m ago')).toBeInTheDocument();
+    expect(screen.getByText('6-K')).toBeInTheDocument();
+    expect(screen.getByText('PR')).toBeInTheDocument();
+    expect(screen.getByText('in 1s')).toBeInTheDocument();
+    expect(screen.getByText('Worksport Announces Record Growth')).toBeInTheDocument();
+    expect(screen.queryByText(/nuntiobot\.com/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sec\.gov/)).not.toBeInTheDocument();
   });
 
   test('formats trading bot news headlines without exposing URLs', async () => {
