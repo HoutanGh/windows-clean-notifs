@@ -263,12 +263,109 @@ describe('App', () => {
 
   test('loads hidden dashboard controls from browser storage', async () => {
     window.localStorage.setItem('windows-clean-notifs-chrome-hidden', 'true');
+    window.localStorage.setItem(
+      'windows-clean-notifs-chrome-rail-placement',
+      JSON.stringify({ edge: 'bottom', offset: 0.25, locked: true })
+    );
     const api = createApi();
 
     renderApp(api);
 
     expect(screen.queryByRole('banner')).not.toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Show controls' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Hidden dashboard controls')).toHaveClass('rail-edge-bottom', 'rail-align-start');
+    expect(screen.getByLabelText('Hidden dashboard controls')).toHaveStyle('--chrome-rail-offset: 25%');
+    expect(screen.getByRole('button', { name: 'Unlock position' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show dashboard controls' })).toHaveTextContent('⋯');
+  });
+
+  test('opens hidden controls only from the visible rail toggle', async () => {
+    const api = createApi();
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('button', { name: 'Hide controls' }));
+
+    const rail = screen.getByLabelText('Hidden dashboard controls');
+    const handle = screen.getByRole('button', { name: 'Show dashboard controls' });
+
+    fireEvent.pointerEnter(rail);
+    expect(rail).not.toHaveClass('menu-open');
+    expect(handle).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.pointerEnter(handle);
+    expect(rail).toHaveClass('menu-open');
+    expect(handle).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.pointerLeave(rail);
+    expect(rail).not.toHaveClass('menu-open');
+    expect(handle).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  test('drags the hidden controls toggle around the perimeter and locks its position', async () => {
+    const api = createApi();
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('button', { name: 'Hide controls' }));
+
+    const rail = screen.getByLabelText('Hidden dashboard controls');
+    const handle = screen.getByRole('button', { name: 'Show dashboard controls' });
+
+    dispatchPointerEvent(handle, 'pointerdown', {
+      pointerId: 1,
+      button: 0,
+      clientX: 1000,
+      clientY: 380
+    });
+    dispatchPointerEvent(handle, 'pointermove', {
+      pointerId: 1,
+      buttons: 1,
+      clientX: 8,
+      clientY: 160
+    });
+    dispatchPointerEvent(handle, 'pointerup', {
+      pointerId: 1,
+      button: 0,
+      clientX: 8,
+      clientY: 160
+    });
+
+    expect(rail).toHaveClass('rail-edge-left', 'rail-align-start');
+    expect(rail).not.toHaveClass('menu-open');
+    await waitFor(() => expect(readChromeRailPlacement()).toEqual({
+      edge: 'left',
+      offset: 160 / window.innerHeight,
+      locked: false
+    }));
+
+    fireEvent.pointerEnter(handle);
+    fireEvent.click(screen.getByRole('button', { name: 'Lock position' }));
+    expect(screen.getByRole('button', { name: 'Unlock position' })).toBeInTheDocument();
+
+    dispatchPointerEvent(handle, 'pointerdown', {
+      pointerId: 2,
+      button: 0,
+      clientX: 8,
+      clientY: 160
+    });
+    dispatchPointerEvent(handle, 'pointermove', {
+      pointerId: 2,
+      buttons: 1,
+      clientX: window.innerWidth / 2,
+      clientY: window.innerHeight - 4
+    });
+    dispatchPointerEvent(handle, 'pointerup', {
+      pointerId: 2,
+      button: 0,
+      clientX: window.innerWidth / 2,
+      clientY: window.innerHeight - 4
+    });
+
+    expect(rail).toHaveClass('rail-edge-left');
+    await waitFor(() => expect(readChromeRailPlacement()).toEqual({
+      edge: 'left',
+      offset: 160 / window.innerHeight,
+      locked: true
+    }));
   });
 
   test('renders Discord view with channel columns', async () => {
@@ -969,6 +1066,24 @@ function discordCard(id: number): HTMLElement {
   return card;
 }
 
+function dispatchPointerEvent(
+  element: Element,
+  type: 'pointerdown' | 'pointermove' | 'pointerup',
+  properties: {
+    pointerId: number;
+    button?: number;
+    buttons?: number;
+    clientX: number;
+    clientY: number;
+  }
+) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  for (const [name, value] of Object.entries(properties)) {
+    Object.defineProperty(event, name, { value });
+  }
+  fireEvent(element, event);
+}
+
 function source(displayName: string, appId: string, enabled: boolean): NotificationSource {
   return {
     appId,
@@ -985,6 +1100,12 @@ function readHiddenDiscordChannelKeys(): string[] {
 
 function readDiscordChannelOrderKeys(): string[] {
   return JSON.parse(window.localStorage.getItem('windows-clean-notifs-discord-channel-order') ?? '[]') as string[];
+}
+
+function readChromeRailPlacement(): { edge: string; offset: number; locked: boolean } {
+  return JSON.parse(
+    window.localStorage.getItem('windows-clean-notifs-chrome-rail-placement') ?? '{}'
+  ) as { edge: string; offset: number; locked: boolean };
 }
 
 function readHighlightedDiscordNotifications(): Array<[string, number]> {
