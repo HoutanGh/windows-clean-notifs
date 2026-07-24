@@ -406,7 +406,9 @@ describe('App', () => {
     renderApp(api);
     fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
 
-    expect(await screen.findByText('SURG')).toBeInTheDocument();
+    const ticker = await screen.findByText('SURG');
+    expect(ticker).toBeInTheDocument();
+    expect(ticker.closest('li')).toHaveClass('trading-card-direction-up');
     expect(screen.getByLabelText('US flag')).toBeInTheDocument();
     expect(screen.getByText('Float')).toBeInTheDocument();
     expect(screen.getByText('16.0 M')).toBeInTheDocument();
@@ -420,6 +422,28 @@ describe('App', () => {
     expect(screen.queryByText('RVol')).not.toBeInTheDocument();
     expect(screen.queryByText(/sec\.gov/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Link/)).not.toBeInTheDocument();
+  });
+
+  test('marks downward trading scanner alerts for terminal styling', async () => {
+    const api = createApi({
+      getNotifications: vi.fn().mockResolvedValue([
+        discordNotification(
+          86,
+          '📊 MAIN CHATS',
+          '#💰│trading-chat',
+          'NuntioBot',
+          '`16:07` ↓ **LASE** < $2 ~ :flag_us: | **Vol**: 842 K | **RVol**: 3.1x'
+        )
+      ])
+    });
+
+    renderApp(api);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Discord' }));
+
+    const ticker = await screen.findByText('LASE');
+    expect(ticker.closest('li')).toHaveClass('trading-card-direction-down');
+    expect(screen.getByText('↓')).toHaveClass('direction-down');
+    expect(screen.getByLabelText('US flag')).toBeInTheDocument();
   });
 
   test('keeps present RVol and collapses trading bot PR links to labels', async () => {
