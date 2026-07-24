@@ -943,6 +943,7 @@ h3 {
   }
 }
 
+/* High-contrast terminal treatment for Night mode. */
 :root[data-theme='night'] {
   color-scheme: dark;
   background: #111416;
@@ -1156,6 +1157,286 @@ h3 {
 
 :root[data-theme='night'] .error-text {
   color: #ffb4ab;
+}
+
+.trading-bot-card.trading-card-direction-up {
+  box-shadow: inset 4px 0 0 #00c853;
+}
+
+.trading-bot-card.trading-card-direction-down {
+  box-shadow: inset 4px 0 0 #ff3b30;
+}
+
+:root[data-theme='night'] {
+  font-family:
+    "Cascadia Code",
+    "Cascadia Mono",
+    Consolas,
+    monospace;
+  background: #050607;
+  color: #f2f4f5;
+}
+
+:root[data-theme='night'] .app-shell {
+  background: #050607;
+  color: #f2f4f5;
+}
+
+:root[data-theme='night'] .app-header {
+  border-bottom-color: #20262b;
+  background: #050607;
+  backdrop-filter: none;
+}
+
+:root[data-theme='night'] .status-line,
+:root[data-theme='night'] .source-name,
+:root[data-theme='night'] .notification-row time,
+:root[data-theme='night'] .discord-card time,
+:root[data-theme='night'] .discord-channel-column small,
+:root[data-theme='night'] .source-row small,
+:root[data-theme='night'] .discord-hidden-controls,
+:root[data-theme='night'] .muted-text,
+:root[data-theme='night'] .trading-time,
+:root[data-theme='night'] .trading-price,
+:root[data-theme='night'] .trading-percent,
+:root[data-theme='night'] .trading-related > div,
+:root[data-theme='night'] .discord-card .trading-note {
+  color: #7d8790;
+}
+
+:root[data-theme='night'] .status-connected {
+  background: #00c853;
+}
+
+:root[data-theme='night'] .status-reconnecting,
+:root[data-theme='night'] .status-connecting {
+  background: #7d8790;
+}
+
+:root[data-theme='night'] .status-unavailable,
+:root[data-theme='night'] .error-text {
+  color: #ff3b30;
+}
+
+:root[data-theme='night'] .status-unavailable {
+  background: #ff3b30;
+}
+
+:root[data-theme='night'] .button {
+  border-color: #303840;
+  border-radius: 3px;
+  background: #0a0d0f;
+  color: #f2f4f5;
+}
+
+:root[data-theme='night'] .button:hover:not(:disabled) {
+  border-color: #7d8790;
+  background: #11171a;
+}
+
+:root[data-theme='night'] .chrome-rail-handle {
+  border-color: #303840;
+  border-radius: 4px;
+  background: #050607;
+  color: #f2f4f5;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+:root[data-theme='night'] .chrome-rail-handle:hover,
+:root[data-theme='night'] .chrome-control-rail:focus-within .chrome-rail-handle {
+  border-color: #f2f4f5;
+  background: #0a0d0f;
+  color: #f2f4f5;
+}
+
+:root[data-theme='night'] .chrome-rail-actions {
+  border-color: #303840;
+  border-radius: 3px;
+  background: #050607;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+:root[data-theme='night'] .view-switch,
+:root[data-theme='night'] .theme-switch {
+  border-color: #303840;
+  border-radius: 3px;
+  background: #050607;
+}
+
+:root[data-theme='night'] .view-switch button,
+:root[data-theme='night'] .theme-switch button {
+  border-radius: 2px;
+  color: #7d8790;
+}
+
+:root[data-theme='night'] .view-switch button:hover,
+:root[data-theme='night'] .theme-switch button:hover {
+  background: #11171a;
+  color: #f2f4f5;
+}
+
+:root[data-theme='night'] .view-switch button.active,
+:root[data-theme='night'] .theme-switch button.active {
+  background: #f2f4f5;
+  color: #050607;
+}
+
+:root[data-theme='night'] .notification-row,
+:root[data-theme='night'] .state-message,
+:root[data-theme='night'] .source-row,
+:root[data-theme='night'] .discord-hidden-controls {
+  border-color: #20262b;
+}
+
+:root[data-theme='night'] .state-message strong,
+:root[data-theme='night'] .notification-content,
+:root[data-theme='night'] .primary-text,
+:root[data-theme='night'] .message-text {
+  color: #f2f4f5;
+}
+
+:root[data-theme='night'] .discord-columns {
+  gap: 12px;
+}
+
+:root[data-theme='night'] .discord-channel-column {
+  border-color: #303840;
+  border-top-color: #f2f4f5;
+  border-radius: 3px;
+  background: #0a0d0f;
+}
+
+:root[data-theme='night'] .discord-channel-column header {
+  min-height: 50px;
+  border-color: #303840;
+  border-radius: 0;
+  background: #11171a;
+}
+
+:root[data-theme='night'] .discord-channel-column h3,
+:root[data-theme='night'] .discord-card strong,
+:root[data-theme='night'] .discord-card p,
+:root[data-theme='night'] .trading-ticker,
+:root[data-theme='night'] .trading-metric strong,
+:root[data-theme='night'] .trading-related strong,
+:root[data-theme='night'] .discord-card .trading-headline,
+:root[data-theme='night'] .discord-card .trading-clean-text {
+  color: #f2f4f5;
+}
+
+:root[data-theme='night'] .discord-channel-actions span {
+  border: 1px solid #20262b;
+  border-radius: 2px;
+  background: #0a0d0f;
+  color: #7d8790;
+}
+
+:root[data-theme='night'] .hide-channel-button {
+  border-radius: 2px;
+  background: transparent;
+  color: #7d8790;
+}
+
+:root[data-theme='night'] .hide-channel-button:hover {
+  background: #20262b;
+  color: #f2f4f5;
+}
+
+:root[data-theme='night'] .discord-card {
+  border-color: #20262b;
+  background: #0a0d0f;
+}
+
+:root[data-theme='night'] .discord-card.activity-highlight {
+  background: #11171a;
+  box-shadow: inset 4px 0 0 #f2f4f5;
+}
+
+:root[data-theme='night'] .discord-card.activity-highlight:hover {
+  background: #151c20;
+}
+
+:root[data-theme='night'] .discord-card.activity-highlight:focus-visible {
+  outline-color: #f2f4f5;
+}
+
+:root[data-theme='night'] .trading-bot-card.trading-card-direction-up {
+  box-shadow: inset 4px 0 0 #00c853;
+}
+
+:root[data-theme='night'] .trading-bot-card.trading-card-direction-down {
+  box-shadow: inset 4px 0 0 #ff3b30;
+}
+
+:root[data-theme='night'] .direction-up,
+:root[data-theme='night'] .signal-up {
+  border: 1px solid #00c853;
+  background: #00c853;
+  color: #050607;
+}
+
+:root[data-theme='night'] .direction-down,
+:root[data-theme='night'] .signal-down {
+  border: 1px solid #ff3b30;
+  background: #ff3b30;
+  color: #050607;
+}
+
+:root[data-theme='night'] .discord-card .trading-ticker {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid #f2f4f5;
+  border-radius: 2px;
+  background: #f2f4f5;
+  color: #050607;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+:root[data-theme='night'] .trading-flag.fi {
+  width: 20px;
+  height: 15px;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px #303840;
+}
+
+:root[data-theme='night'] .trading-signal,
+:root[data-theme='night'] .signal-news,
+:root[data-theme='night'] .signal-filing,
+:root[data-theme='night'] .signal-risk {
+  border: 1px solid #303840;
+  border-radius: 3px;
+  background: #11171a;
+  color: #f2f4f5;
+}
+
+:root[data-theme='night'] .signal-risk {
+  border-color: #ff3b30;
+}
+
+:root[data-theme='night'] .trading-metric {
+  border-color: #303840;
+  border-radius: 3px;
+  background: #11171a;
+  color: #7d8790;
+}
+
+:root[data-theme='night'] .sources-panel {
+  border-color: #303840;
+  border-radius: 3px;
+  background: #0a0d0f;
+  box-shadow: none;
+}
+
+@keyframes discord-card-activity-arrival-night {
+  0% {
+    background: #182025;
+    box-shadow: inset 6px 0 0 #f2f4f5;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

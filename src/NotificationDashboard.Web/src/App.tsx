@@ -1098,6 +1098,9 @@ function DiscordNotificationCard({
       className={[
         'discord-card',
         tradingMessage ? 'trading-bot-card' : '',
+        tradingMessage?.kind === 'scanner'
+          ? `trading-card-${formatTradingDirectionClass(tradingMessage.direction)}`
+          : '',
         highlighted ? 'activity-highlight' : '',
         animateArrival ? 'activity-arrival' : ''
       ].filter(Boolean).join(' ')}
